@@ -32,7 +32,9 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -116,6 +118,7 @@ public class DynamicSkateboardsMod {
         var registrar = event.registrar("1");
         registrar.playToClient(SkatingStatePayload.TYPE, SkatingStatePayload.STREAM_CODEC, SkatingStatePayload::handle);
         registrar.playToServer(SkateJumpInputPayload.TYPE, SkateJumpInputPayload.STREAM_CODEC, SkateJumpInputPayload::handle);
+        registrar.playToServer(SkateTrickInputPayload.TYPE, SkateTrickInputPayload.STREAM_CODEC, SkateTrickInputPayload::handle);
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
@@ -154,8 +157,22 @@ public class DynamicSkateboardsMod {
          */
         private static final Map<UUID, Boolean> JUMP_HELD = new ConcurrentHashMap<>();
 
+        /**
+         * The server's authoritative mirror of each online player's Shift/attack/use/WASD keys,
+         * kept live only by {@link SkateTrickInputPayload} &mdash; same reasoning as
+         * {@link #JUMP_HELD}, one payload for the rest of this story's inputs.
+         */
+        private static final Map<UUID, SkateTrickInputPayload> TRICK_INPUT = new ConcurrentHashMap<>();
+
+        /** Last tick's attack-held value, so {@code attackJustPressed} can be derived as an edge. */
+        private static final Map<UUID, Boolean> PREVIOUS_ATTACK_HELD = new ConcurrentHashMap<>();
+
         public static void setJumpHeld(UUID player, boolean jumping) {
             JUMP_HELD.put(player, jumping);
+        }
+
+        public static void setTrickInput(UUID player, SkateTrickInputPayload payload) {
+            TRICK_INPUT.put(player, payload);
         }
 
         @SubscribeEvent
@@ -172,9 +189,17 @@ public class DynamicSkateboardsMod {
             double observedHorizontalSpeed = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
             double facingHeadingDegrees = player.getYRot();
 
+            SkateTrickInputPayload trickInput = TRICK_INPUT.getOrDefault(player.getUUID(), EMPTY_TRICK_INPUT);
+            boolean attackHeld = trickInput.attackHeld();
+            boolean attackJustPressed = attackHeld && !PREVIOUS_ATTACK_HELD.getOrDefault(player.getUUID(), Boolean.FALSE);
+            PREVIOUS_ATTACK_HELD.put(player.getUUID(), attackHeld);
+            TrickDirection direction = TrickDirection.fromKeys(
+                    trickInput.forwardHeld(), trickInput.backHeld(), trickInput.leftHeld(), trickInput.rightHeld());
+
             SkateState previousState = controller.state();
             SkateState newState = controller.update(new SkateInput(
-                    mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees));
+                    mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
+                    trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction));
 
             if (newState != SkateState.GROUNDED) {
                 applyRidingVelocity(player, controller, delta);
@@ -183,6 +208,14 @@ public class DynamicSkateboardsMod {
             if (newState != previousState) {
                 PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new SkatingStatePayload(player.getUUID(), newState));
             }
+        }
+
+        private static final SkateTrickInputPayload EMPTY_TRICK_INPUT =
+                new SkateTrickInputPayload(false, false, false, false, false, false, false);
+
+        /** Whether vanilla left/right click must be suppressed for {@code player} right now. */
+        public static boolean suppressVanillaClicks(ServerPlayer player) {
+            return ClickSuppressionPolicy.suppressVanillaClicks(SYNC_POLICY.controllerFor(player.getUUID()).state());
         }
 
         private static void applyRidingVelocity(ServerPlayer player, SkateController controller, Vec3 currentDelta) {
@@ -220,9 +253,50 @@ public class DynamicSkateboardsMod {
         public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
             Entity entity = event.getEntity();
             JUMP_HELD.remove(entity.getUUID());
+            TRICK_INPUT.remove(entity.getUUID());
+            PREVIOUS_ATTACK_HELD.remove(entity.getUUID());
             SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
             if (broadcast != null) {
                 PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), broadcast));
+            }
+        }
+
+        /**
+         * VANILLA CLICK SUPPRESSION (server-authoritative half): left click must not attack while
+         * skating &mdash; the player is kickflipping, not swinging the board at mobs. Decision is
+         * {@link ClickSuppressionPolicy}, a pure function of {@link SkateState}; this handler only
+         * wires it to the event. Restored automatically the instant {@link SkateController} itself
+         * returns to GROUNDED (see its own {@code !mainHandIsSkateboard} exit path) &mdash; there is
+         * nothing extra to "turn back on" here.
+         */
+        @SubscribeEvent
+        public static void onAttackEntity(AttackEntityEvent event) {
+            if (event.getEntity() instanceof ServerPlayer player && suppressVanillaClicks(player)) {
+                event.setCanceled(true);
+            }
+        }
+
+        /** Left click on a block must not mine while skating. */
+        @SubscribeEvent
+        public static void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
+            if (event.getEntity() instanceof ServerPlayer player && suppressVanillaClicks(player)) {
+                event.setCanceled(true);
+            }
+        }
+
+        /** Right click on a block must not place/use while skating. */
+        @SubscribeEvent
+        public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+            if (event.getEntity() instanceof ServerPlayer player && suppressVanillaClicks(player)) {
+                event.setCanceled(true);
+            }
+        }
+
+        /** Right click with an item (eating, using) must not fire while skating. */
+        @SubscribeEvent
+        public static void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
+            if (event.getEntity() instanceof ServerPlayer player && suppressVanillaClicks(player)) {
+                event.setCanceled(true);
             }
         }
     }
@@ -237,7 +311,7 @@ public class DynamicSkateboardsMod {
             SkateState state = SkateClientState.state(event.getEntity().getUUID());
             float offset = switch (state) {
                 case GROUNDED -> 0.0f;
-                case SKATING -> SkateConstants.SKATE_STANCE_HEIGHT_OFFSET;
+                case SKATING, MANUAL -> SkateConstants.SKATE_STANCE_HEIGHT_OFFSET;
                 case CHARGING -> SkateConstants.SKATE_STANCE_HEIGHT_OFFSET + SkateConstants.CHARGE_STANCE_EXTRA_HEIGHT_OFFSET;
                 case AIRBORNE -> SkateConstants.AIRBORNE_HEIGHT_OFFSET;
                 case LANDING -> SkateConstants.LANDING_HEIGHT_OFFSET;
@@ -259,6 +333,14 @@ public class DynamicSkateboardsMod {
                 return;
             }
             PacketDistributor.sendToServer(new SkateJumpInputPayload(client.options.keyJump.isDown()));
+            PacketDistributor.sendToServer(new SkateTrickInputPayload(
+                    client.options.keyShift.isDown(),
+                    client.options.keyAttack.isDown(),
+                    client.options.keyUse.isDown(),
+                    client.options.keyUp.isDown(),
+                    client.options.keyDown.isDown(),
+                    client.options.keyLeft.isDown(),
+                    client.options.keyRight.isDown()));
         }
 
         /**
