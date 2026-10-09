@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicskateboards;
 
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,8 +13,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -30,6 +36,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -49,8 +56,53 @@ public class DynamicSkateboardsMod {
     public static final DeferredItem<SkateboardItem> SKATEBOARD =
             ITEMS.register("skateboard", () -> new SkateboardItem(new Item.Properties().stacksTo(1)));
 
+    public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MODID);
+
+    private static BlockBehaviour.Properties cobbleProperties() {
+        return BlockBehaviour.Properties.of()
+                .mapColor(MapColor.STONE)
+                .sound(SoundType.STONE)
+                .strength(2.0F, 6.0F);
+    }
+
+    /**
+     * The 10-piece vertical transition family (MINECRAFT-97 "Prototype skate geometry" /
+     * "Vertical transition pieces"). One {@link SlopeBlock} per {@link SlopeKind}; see that enum
+     * and {@link SlopeShapes} for the authored geometry.
+     */
+    public static final Map<SlopeKind, DeferredBlock<SlopeBlock>> SLOPES = new EnumMap<>(SlopeKind.class);
+
+    static {
+        for (SlopeKind kind : SlopeKind.values()) {
+            SLOPES.put(kind, BLOCKS.register(kind.blockName(), () -> new SlopeBlock(cobbleProperties(), kind)));
+        }
+    }
+
+    /** Curved cobblestone step and wall (MINECRAFT-97 "Horizontal curves"). See {@link CurvedShapes}. */
+    public static final DeferredBlock<CurvedBlock> CURVED_STEP =
+            BLOCKS.register("curved_step", () -> new CurvedBlock(cobbleProperties(), 8));
+    public static final DeferredBlock<CurvedBlock> CURVED_WALL =
+            BLOCKS.register("curved_wall", () -> new CurvedBlock(cobbleProperties(), 16));
+
+    public static final Map<String, DeferredItem<BlockItem>> BLOCK_ITEMS = new java.util.LinkedHashMap<>();
+
+    private static DeferredItem<BlockItem> registerBlockItem(String name, DeferredBlock<? extends Block> block) {
+        DeferredItem<BlockItem> item = ITEMS.register(name, () -> new BlockItem(block.get(), new Item.Properties()));
+        BLOCK_ITEMS.put(name, item);
+        return item;
+    }
+
+    static {
+        for (SlopeKind kind : SlopeKind.values()) {
+            registerBlockItem(kind.blockName(), SLOPES.get(kind));
+        }
+        registerBlockItem("curved_step", CURVED_STEP);
+        registerBlockItem("curved_wall", CURVED_WALL);
+    }
+
     public DynamicSkateboardsMod(IEventBus modEventBus, ModContainer modContainer) {
         ITEMS.register(modEventBus);
+        BLOCKS.register(modEventBus);
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::addCreative);
         modEventBus.addListener(this::registerPayloads);
@@ -69,6 +121,9 @@ public class DynamicSkateboardsMod {
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(SKATEBOARD);
+        }
+        if (event.getTabKey() == CreativeModeTabs.BUILDING_BLOCKS) {
+            BLOCK_ITEMS.values().forEach(event::accept);
         }
     }
 
