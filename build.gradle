@@ -1,0 +1,142 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.147'
+    id 'idea'
+}
+
+tasks.named('wrapper', Wrapper).configure {
+    distributionType = Wrapper.DistributionType.BIN
+}
+
+group = mod_group_id
+
+// Single source of truth for the shipped version is `version=` in
+// gradle.properties, the file the release gate reads. A release workflow may
+// override it with `-Pmod_version=<version>`.
+def modVersion = (findProperty("mod_version") ?: project.version) as String
+version = modVersion
+
+sourceSets.main.resources {
+    srcDir('src/generated/resources')
+    exclude("src/generated/**/.cache")
+}
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang ships Java 21 to end users in 1.21.1, so mods target Java 21.
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+        }
+
+        gameTestServer {
+            type = "gameTestServer"
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        data {
+            data()
+            programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+// Sable (PolyForm Shield 1.0.0) is compiled against only; the pack provides it at runtime.
+def sableJar = layout.buildDirectory.file("sable/sable-neoforge-1.21.1-${project.sable_version}.jar")
+def sableCompanionJar = layout.buildDirectory.file("sable/sable-companion-common.jar")
+def sableVersion = project.sable_version
+def sableSha512 = project.sable_sha512
+def sableUrl = project.sable_url
+tasks.register("downloadSable") {
+    outputs.files(sableJar, sableCompanionJar)
+    doLast {
+        def target = sableJar.get().asFile
+        target.parentFile.mkdirs()
+        new URL(sableUrl).withInputStream { input -> target.withOutputStream { it << input } }
+        def actual = java.security.MessageDigest.getInstance("SHA-512").digest(target.bytes).encodeHex().toString()
+        logger.lifecycle("downloadSable: fetched Sable ${sableVersion}, sha512=${actual}")
+        if (actual != sableSha512) {
+            target.delete()
+            throw new GradleException("Sable ${sableVersion} sha512 mismatch: ${actual}")
+        }
+        logger.lifecycle("downloadSable: sha512 verified against pinned value")
+        // The companion math API (Pose3d, ...) ships jar-in-jar inside Sable.
+        def zip = new java.util.zip.ZipFile(target)
+        def entry = zip.entries().find { it.name.startsWith("META-INF/jarjar/sable-companion-common") }
+        sableCompanionJar.get().asFile.withOutputStream { it << zip.getInputStream(entry) }
+        zip.close()
+        logger.lifecycle("downloadSable: unpacked jar-in-jar sable-companion-common")
+    }
+}
+
+dependencies {
+    compileOnly files(sableJar, sableCompanionJar).builtBy("downloadSable")
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// Expands `${mod_version}` and friends in neoforge.mods.toml to the values
+// computed above, so the jar's file name and the version baked into the
+// built jar's mods.toml can never drift apart.
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : modVersion,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}
