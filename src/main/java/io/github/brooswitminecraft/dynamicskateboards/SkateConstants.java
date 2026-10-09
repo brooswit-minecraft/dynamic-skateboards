@@ -74,5 +74,46 @@ public final class SkateConstants {
      */
     public static final int INPUT_BUFFER_WINDOW_TICKS = 6;
 
+    // --- Grinding (story e): detector, acquisition, following, release ---
+
+    /**
+     * Usable-length threshold for a candidate grind edge, in 1/16ths of a block. The spec's own
+     * initial guideline ("approximately 4/16 of a block"); testing here found no reason to move
+     * off it &mdash; see docs/grindable-edges.md, which every (d)-authored edge clears
+     * comfortably at this value.
+     */
+    public static final double GRIND_MIN_EDGE_LENGTH_VOXELS = 4.0;
+
+    /**
+     * How far a single sample-to-sample height step (within one block's own box decomposition)
+     * is still read as "the same smooth ramp," in 1/16ths of a block. Below this, consecutive
+     * samples merge into one diagonal chord (a slope's stepped approximation); at or above it,
+     * the profile splits into separate chords instead of faking a smooth line through a real
+     * riser (a stair's jump from tread to tread is 8 voxels &mdash; nowhere close). Every
+     * geometry this story ships (slopes: at most 1 voxel per column) stays well under this.
+     */
+    public static final double GRIND_PROFILE_MAX_SMOOTH_STEP_VOXELS = 2.0;
+
+    /** How many blocks out from the player {@link GrindEdgeDetector} scans, each axis. Bounded and local by design: see that class's javadoc. */
+    public static final int GRIND_SCAN_RADIUS_BLOCKS = 2;
+
+    /**
+     * Acquisition snap radius, in blocks: how far a candidate edge's nearest point may be from
+     * the player for Shift to acquire it. Generous per the spec's "bias toward generous grind
+     * snapping" &mdash; a player who aimed at a rail should get it.
+     */
+    public static final double GRIND_SNAP_RADIUS_BLOCKS = 2.5;
+
+    /**
+     * Approach tolerance, in degrees: how far the player's current horizontal heading may differ
+     * from a candidate edge's own direction (or its reverse) for Shift to acquire it while
+     * airborne/approaching. Generous, not strict alignment &mdash; the player is approaching, not
+     * already riding the rail.
+     */
+    public static final double GRIND_APPROACH_MAX_ANGLE_DEGREES = 70.0;
+
+    /** Ticks after release before the same edge can be re-acquired, avoiding an instant re-snap. */
+    public static final int GRIND_REACQUIRE_COOLDOWN_TICKS = 10;
+
     private SkateConstants() {}
 }

@@ -152,6 +152,15 @@ public class DynamicSkateboardsMod {
         private static final SkateSyncPolicy SYNC_POLICY = new SkateSyncPolicy();
 
         /**
+         * One {@link WorldGrindSeam} per online player (story (e)), wired into that player's
+         * {@link SkateController} in place of {@link GrindSeam#NONE} the first time a controller
+         * is created for them. Kept here rather than inside {@link SkateSyncPolicy} because it
+         * needs real Minecraft types ({@code ServerPlayer}/{@code Level}); {@code SkateSyncPolicy}
+         * stays pure.
+         */
+        private static final Map<UUID, WorldGrindSeam> GRIND_SEAMS = new ConcurrentHashMap<>();
+
+        /**
          * The server's authoritative mirror of each online player's Jump key, kept live only by
          * {@link SkateJumpInputPayload} &mdash; see that class's javadoc for why a normal
          * (non-vehicle) {@code ServerPlayer} has no other continuously-live source for it.
@@ -181,7 +190,9 @@ public class DynamicSkateboardsMod {
             if (!(event.getEntity() instanceof ServerPlayer player)) {
                 return;
             }
-            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID());
+            WorldGrindSeam grindSeam = GRIND_SEAMS.computeIfAbsent(player.getUUID(), id -> new WorldGrindSeam());
+            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID(), grindSeam);
+            grindSeam.prepare(player);
 
             boolean mainHandIsSkateboard = player.getItemInHand(InteractionHand.MAIN_HAND).is(SKATEBOARD);
             boolean jumpHeld = JUMP_HELD.getOrDefault(player.getUUID(), Boolean.FALSE);
@@ -202,8 +213,21 @@ public class DynamicSkateboardsMod {
                     mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
                     trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction));
 
+            // Review fix: a grind active the tick riding goes GROUNDED outright (board
+            // unequipped mid-grind, etc.) must be dropped here - tick() below only ever runs
+            // while non-GROUNDED, so without this a stale follower would silently resume (and
+            // teleport the player back onto the old path) the next time they mount and go
+            // airborne.
+            grindSeam.clearIfNotRiding(newState != SkateState.GROUNDED);
+
             if (newState != SkateState.GROUNDED) {
-                applyRidingVelocity(player, controller, delta);
+                if (grindSeam.isGrinding()) {
+                    // Overrides position/velocity directly along the acquired edge; never also
+                    // run the normal riding velocity model for the same tick (they'd fight).
+                    grindSeam.tick(player, controller.speed(), trickInput.shiftHeld(), jumpHeld);
+                } else {
+                    applyRidingVelocity(player, controller, delta);
+                }
             }
 
             if (newState != previousState) {
@@ -250,12 +274,29 @@ public class DynamicSkateboardsMod {
             PacketDistributor.sendToPlayer(tracker, new SkatingStatePayload(target.getUUID(), state));
         }
 
+        /**
+         * Death/dimension-change respawn repositions the player outright; any grind active at
+         * that moment is exactly the same stale-follower hazard {@link #serverPlayerTick}'s
+         * {@code clearIfNotRiding} call fixes for GROUNDED, so drop it here too rather than let
+         * it resume relative to wherever the respawn moved the player.
+         */
+        @SubscribeEvent
+        public static void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
+            if (event.getEntity() instanceof ServerPlayer player) {
+                WorldGrindSeam grindSeam = GRIND_SEAMS.get(player.getUUID());
+                if (grindSeam != null) {
+                    grindSeam.clearIfNotRiding(false);
+                }
+            }
+        }
+
         @SubscribeEvent
         public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
             Entity entity = event.getEntity();
             JUMP_HELD.remove(entity.getUUID());
             TRICK_INPUT.remove(entity.getUUID());
             PREVIOUS_ATTACK_HELD.remove(entity.getUUID());
+            GRIND_SEAMS.remove(entity.getUUID());
             SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
             if (broadcast != null) {
                 PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), broadcast));
