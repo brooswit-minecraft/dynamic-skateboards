@@ -42,6 +42,16 @@ public final class SkateSyncPolicy {
         return controllers.computeIfAbsent(player, id -> new SkateController());
     }
 
+    /**
+     * Same as {@link #controllerFor(UUID)}, but a freshly-created controller is wired to
+     * {@code grindSeam} (story (e)) instead of {@link GrindSeam#NONE}. {@code grindSeam} is
+     * ignored if a controller for {@code player} already exists &mdash; the seam a controller
+     * uses is fixed at its own construction, same as any other constructor argument.
+     */
+    public SkateController controllerFor(UUID player, GrindSeam grindSeam) {
+        return controllers.computeIfAbsent(player, id -> new SkateController(grindSeam));
+    }
+
     /** The state to unconditionally send to a client that just started tracking {@code target}. */
     public SkateState stateToSendOnStartTracking(UUID target) {
         SkateController controller = controllers.get(target);

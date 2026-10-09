@@ -152,6 +152,15 @@ public class DynamicSkateboardsMod {
         private static final SkateSyncPolicy SYNC_POLICY = new SkateSyncPolicy();
 
         /**
+         * One {@link WorldGrindSeam} per online player (story (e)), wired into that player's
+         * {@link SkateController} in place of {@link GrindSeam#NONE} the first time a controller
+         * is created for them. Kept here rather than inside {@link SkateSyncPolicy} because it
+         * needs real Minecraft types ({@code ServerPlayer}/{@code Level}); {@code SkateSyncPolicy}
+         * stays pure.
+         */
+        private static final Map<UUID, WorldGrindSeam> GRIND_SEAMS = new ConcurrentHashMap<>();
+
+        /**
          * The server's authoritative mirror of each online player's Jump key, kept live only by
          * {@link SkateJumpInputPayload} &mdash; see that class's javadoc for why a normal
          * (non-vehicle) {@code ServerPlayer} has no other continuously-live source for it.
@@ -181,7 +190,9 @@ public class DynamicSkateboardsMod {
             if (!(event.getEntity() instanceof ServerPlayer player)) {
                 return;
             }
-            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID());
+            WorldGrindSeam grindSeam = GRIND_SEAMS.computeIfAbsent(player.getUUID(), id -> new WorldGrindSeam());
+            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID(), grindSeam);
+            grindSeam.prepare(player);
 
             boolean mainHandIsSkateboard = player.getItemInHand(InteractionHand.MAIN_HAND).is(SKATEBOARD);
             boolean jumpHeld = JUMP_HELD.getOrDefault(player.getUUID(), Boolean.FALSE);
@@ -203,7 +214,13 @@ public class DynamicSkateboardsMod {
                     trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction));
 
             if (newState != SkateState.GROUNDED) {
-                applyRidingVelocity(player, controller, delta);
+                if (grindSeam.isGrinding()) {
+                    // Overrides position/velocity directly along the acquired edge; never also
+                    // run the normal riding velocity model for the same tick (they'd fight).
+                    grindSeam.tick(player, controller.speed(), trickInput.shiftHeld(), jumpHeld);
+                } else {
+                    applyRidingVelocity(player, controller, delta);
+                }
             }
 
             if (newState != previousState) {
@@ -256,6 +273,7 @@ public class DynamicSkateboardsMod {
             JUMP_HELD.remove(entity.getUUID());
             TRICK_INPUT.remove(entity.getUUID());
             PREVIOUS_ATTACK_HELD.remove(entity.getUUID());
+            GRIND_SEAMS.remove(entity.getUUID());
             SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
             if (broadcast != null) {
                 PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), broadcast));
