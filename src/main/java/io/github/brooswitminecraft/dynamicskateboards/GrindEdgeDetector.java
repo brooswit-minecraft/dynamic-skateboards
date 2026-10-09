@@ -1,7 +1,6 @@
 package io.github.brooswitminecraft.dynamicskateboards;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.function.ToDoubleFunction;
@@ -29,10 +28,12 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *       diagonal line" reasoning in docs/grindable-edges.md. A hard jump (a stair's riser)
  *       splits into separate chords instead of faking one smooth diagonal through it.
  *   <li><b>Depth-profile paths</b> (curved): for the single highest-roof cluster of boxes, when
- *       every box in it is a thin per-column slice (the curved family's authoring style, see
- *       {@link CurvedShapes}), the taper boundary is read directly off each column's box and
- *       chained into a short-segmented {@link GrindPath} &mdash; one segment per column, so
- *       following it turns incrementally rather than snapping once per block.
+ *       the horizontal extent perpendicular to a run axis (the taper depth, see
+ *       {@link CurvedShapes}) actually varies along it, the taper boundary is sampled the same
+ *       way the height-profile is &mdash; by breakpoint, never by assuming any particular box
+ *       count or width &mdash; and chained into a short-segmented {@link GrindPath} without
+ *       merging consecutive samples, so following it turns incrementally rather than snapping
+ *       once per block.
  * </ul>
  *
  * Exposure (not buried against another block, and not covered flush from above) is checked with
@@ -43,7 +44,6 @@ public final class GrindEdgeDetector {
     private GrindEdgeDetector() {}
 
     private static final double EPS = 1.0e-7;
-    private static final double THIN_BOX_THRESHOLD = 0.3;
 
     private record LocalSegment(double[] a, double[] b) {}
 
@@ -182,9 +182,15 @@ public final class GrindEdgeDetector {
     }
 
     /**
-     * The curved family's top-perimeter edge: the single highest-roof cluster of boxes, chained
-     * column by column when every box in it is a thin per-column slice. Returns {@code null} when
-     * this block's geometry doesn't look like that (e.g. a flat-topped shape with no taper).
+     * The curved family's top-perimeter edge: the single highest-roof cluster of boxes, sampled
+     * along a run axis exactly like {@link #heightProfileSegments} but reading each interval's
+     * depth-axis bound instead of its height &mdash; deliberately NOT assuming any particular
+     * box decomposition (e.g. "one box per column"): {@code VoxelShape#optimize()} is free to
+     * merge columns sharing the same depth into wider bands, and this still samples the real
+     * boundary at whatever breakpoints the boxes actually have. Unlike the height-profile family,
+     * consecutive samples are never merged into one chord &mdash; each interval-to-interval step
+     * is kept as its own short segment, so following it turns incrementally. Returns {@code null}
+     * when this block's geometry doesn't look like that (e.g. a flat-topped shape with no taper).
      */
     private static GrindPath depthProfilePath(List<AABB> boxes, BlockPos pos) {
         if (boxes.size() < 2) {
@@ -206,17 +212,6 @@ public final class GrindEdgeDetector {
 
         for (Direction.Axis runAxis : new Direction.Axis[] {Direction.Axis.X, Direction.Axis.Z}) {
             Direction.Axis depthAxis = runAxis == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X;
-            boolean allThin = true;
-            for (AABB box : cluster) {
-                if (axisMax(box, runAxis) - axisMin(box, runAxis) > THIN_BOX_THRESHOLD) {
-                    allThin = false;
-                    break;
-                }
-            }
-            if (!allThin) {
-                continue;
-            }
-
             double minRange = range(cluster, box -> axisMin(box, depthAxis));
             double maxRange = range(cluster, box -> axisMax(box, depthAxis));
             if (Math.max(minRange, maxRange) <= EPS) {
@@ -224,17 +219,43 @@ public final class GrindEdgeDetector {
             }
             boolean useMax = maxRange >= minRange;
 
-            List<AABB> sorted = new ArrayList<>(cluster);
-            sorted.sort(Comparator.comparingDouble(box -> (axisMin(box, runAxis) + axisMax(box, runAxis)) / 2.0));
+            TreeSet<Double> breakSet = new TreeSet<>();
+            breakSet.add(0.0);
+            breakSet.add(1.0);
+            for (AABB box : cluster) {
+                breakSet.add(axisMin(box, runAxis));
+                breakSet.add(axisMax(box, runAxis));
+            }
+            List<Double> breaks = new ArrayList<>(breakSet);
+
+            List<double[]> samples = new ArrayList<>(); // {runMid, depthValue}
+            for (int i = 0; i < breaks.size() - 1; i++) {
+                double a = breaks.get(i);
+                double b = breaks.get(i + 1);
+                double mid = (a + b) / 2.0;
+                Double value = null;
+                for (AABB box : cluster) {
+                    if (axisMin(box, runAxis) - EPS <= mid && mid <= axisMax(box, runAxis) + EPS) {
+                        double candidate = useMax ? axisMax(box, depthAxis) : axisMin(box, depthAxis);
+                        if (value == null || (useMax ? candidate > value : candidate < value)) {
+                            value = candidate;
+                        }
+                    }
+                }
+                if (value != null) {
+                    samples.add(new double[] {mid, value});
+                }
+            }
+            if (samples.size() < 2) {
+                continue;
+            }
 
             List<GrindEdge> segments = new ArrayList<>();
             double[] previous = null;
-            for (AABB box : sorted) {
-                double runCenter = (axisMin(box, runAxis) + axisMax(box, runAxis)) / 2.0;
-                double depthValue = useMax ? axisMax(box, depthAxis) : axisMin(box, depthAxis);
+            for (double[] sample : samples) {
                 double[] point = new double[3];
-                setAxis(point, runAxis, runCenter);
-                setAxis(point, depthAxis, depthValue);
+                setAxis(point, runAxis, sample[0]);
+                setAxis(point, depthAxis, sample[1]);
                 setAxis(point, Direction.Axis.Y, roofY);
                 if (previous != null) {
                     segments.add(new GrindEdge(toWorld(pos, previous), toWorld(pos, point)));
