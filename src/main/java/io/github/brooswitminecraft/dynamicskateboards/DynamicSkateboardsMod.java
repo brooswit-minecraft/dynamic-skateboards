@@ -22,6 +22,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
@@ -85,8 +86,11 @@ public class DynamicSkateboardsMod {
     public static final class ServerEvents {
         private ServerEvents() {}
 
-        /** One {@link SkateController} per online player, server-side only. */
-        private static final Map<UUID, SkateController> CONTROLLERS = new ConcurrentHashMap<>();
+        /**
+         * One {@link SkateController} per online player, server-side only, plus the sync-gap
+         * decisions over it &mdash; see {@link SkateSyncPolicy}.
+         */
+        private static final SkateSyncPolicy SYNC_POLICY = new SkateSyncPolicy();
 
         /**
          * The server's authoritative mirror of each online player's Jump key, kept live only by
@@ -104,7 +108,7 @@ public class DynamicSkateboardsMod {
             if (!(event.getEntity() instanceof ServerPlayer player)) {
                 return;
             }
-            SkateController controller = CONTROLLERS.computeIfAbsent(player.getUUID(), id -> new SkateController());
+            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID());
 
             boolean mainHandIsSkateboard = player.getItemInHand(InteractionHand.MAIN_HAND).is(SKATEBOARD);
             boolean jumpHeld = JUMP_HELD.getOrDefault(player.getUUID(), Boolean.FALSE);
@@ -136,27 +140,34 @@ public class DynamicSkateboardsMod {
             double verticalVelocity = ollieImpulse != null ? ollieImpulse : currentDelta.y;
 
             player.setDeltaMovement(new Vec3(forwardX * speed, verticalVelocity, forwardZ * speed));
+            // Player movement is otherwise client-authoritative: ServerEntity only sends
+            // ClientboundSetEntityMotionPacket (to trackers AND the owning client's own
+            // connection) when hurtMarked is true, same as vanilla knockback. Without this,
+            // setDeltaMovement above would silently never reach any client.
+            player.hurtMarked = true;
         }
 
+        /**
+         * Unconditional per {@link SkateSyncPolicy}: a stale-skating hole would otherwise remain
+         * for an observer who stops tracking while the target skates, outlives that unseen, then
+         * starts tracking again &mdash; they'd never learn the target went back to GROUNDED.
+         */
         @SubscribeEvent
         public static void onStartTracking(PlayerEvent.StartTracking event) {
             if (!(event.getTarget() instanceof ServerPlayer target) || !(event.getEntity() instanceof ServerPlayer tracker)) {
                 return;
             }
-            SkateController controller = CONTROLLERS.get(target.getUUID());
-            SkateState state = controller != null ? controller.state() : SkateState.GROUNDED;
-            if (state != SkateState.GROUNDED) {
-                PacketDistributor.sendToPlayer(tracker, new SkatingStatePayload(target.getUUID(), state));
-            }
+            SkateState state = SYNC_POLICY.stateToSendOnStartTracking(target.getUUID());
+            PacketDistributor.sendToPlayer(tracker, new SkatingStatePayload(target.getUUID(), state));
         }
 
         @SubscribeEvent
         public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
             Entity entity = event.getEntity();
-            SkateController controller = CONTROLLERS.remove(entity.getUUID());
             JUMP_HELD.remove(entity.getUUID());
-            if (controller != null && controller.state() != SkateState.GROUNDED) {
-                PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), SkateState.GROUNDED));
+            SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
+            if (broadcast != null) {
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), broadcast));
             }
         }
     }
@@ -193,6 +204,16 @@ public class DynamicSkateboardsMod {
                 return;
             }
             PacketDistributor.sendToServer(new SkateJumpInputPayload(client.options.keyJump.isDown()));
+        }
+
+        /**
+         * Clears the client-side mirror on disconnect so a UUID that happens to reappear on a
+         * different server (or a fresh join) never starts out rendering a stance left over from
+         * a previous connection.
+         */
+        @SubscribeEvent
+        public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+            SkateClientState.clearAll();
         }
     }
 }

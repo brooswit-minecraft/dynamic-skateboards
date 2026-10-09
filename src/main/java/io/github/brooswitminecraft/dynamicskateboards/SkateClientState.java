@@ -38,4 +38,13 @@ public final class SkateClientState {
     public static boolean isSkating(UUID player) {
         return state(player) != SkateState.GROUNDED;
     }
+
+    /**
+     * Clears every entry. Called on client disconnect ({@code ClientPlayerNetworkEvent.LoggingOut})
+     * so a UUID that happens to reappear on a different server (or a fresh join) never starts out
+     * rendering a stance left over from a previous connection.
+     */
+    public static void clearAll() {
+        STATES.clear();
+    }
 }

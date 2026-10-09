@@ -21,10 +21,13 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
  *
  * <p>Sent on every state transition, to every client tracking the player (self included) &mdash;
  * see {@code DynamicSkateboardsMod.ServerEvents#serverPlayerTick}. Two additional sends close the
- * gaps a transition-only broadcast leaves: {@code onStartTracking} sends the current state once,
- * directly to a client that starts tracking an already-skating player; {@code onLogout} sends
- * GROUNDED before the server stops caring about that player, so no client is left holding a
- * stale non-GROUNDED state.
+ * gaps a transition-only broadcast leaves, both decided by {@link SkateSyncPolicy}:
+ * {@code onStartTracking} sends the target's CURRENT state once, unconditionally (including
+ * GROUNDED), directly to the client that just started tracking them &mdash; unconditional on
+ * purpose, since gating it on "only if skating" would leave an observer who stopped tracking
+ * while the target skated, then reacquired them after they went back to GROUNDED unseen, stuck
+ * believing they're still skating forever; {@code onLogout} sends GROUNDED before the server
+ * stops caring about that player, so no client is left holding a stale non-GROUNDED state.
  */
 public record SkatingStatePayload(UUID player, SkateState state) implements CustomPacketPayload {
     public static final Type<SkatingStatePayload> TYPE =
