@@ -188,7 +188,7 @@ public class LooseSkateboardEntity extends Entity {
      */
     private static void giveBoardOrDrop(Player player) {
         ItemStack stack = new ItemStack(DynamicSkateboardsMod.SKATEBOARD.get());
-        BoardPickupTransfer.give(stack, s -> player.getInventory().add(s), s -> player.drop(s, false));
+        BoardPickupTransfer.give(stack, s -> player.getInventory().add(s), ItemStack::isEmpty, s -> player.drop(s, false));
     }
 
     @Override

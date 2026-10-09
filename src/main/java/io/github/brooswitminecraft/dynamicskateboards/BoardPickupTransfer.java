@@ -1,37 +1,45 @@
 package io.github.brooswitminecraft.dynamicskateboards;
 
 import java.util.function.Consumer;
-
-import net.minecraft.world.item.ItemStack;
+import java.util.function.Predicate;
 
 /**
  * Review fix (item loss on a full inventory): the "give the recovered board back, never let it
- * vanish" decision pulled out of {@link LooseSkateboardEntity#giveBoardOrDrop} as its own pure(ish)
- * seam, so it is unit-testable against a real {@link ItemStack} without a running {@code Level}/
- * {@code Player} &mdash; only {@code ItemStack} itself is a Minecraft type here, and it needs
- * neither a level nor a registry bootstrap to construct or mutate.
+ * vanish" control flow pulled out of {@link LooseSkateboardEntity#giveBoardOrDrop} as its own
+ * pure, generic seam.
  *
- * <p>{@code receiver} mirrors the one contract that matters about {@code
- * net.minecraft.world.entity.player.Inventory#add(ItemStack)}: it may mutate {@code stack} down
- * to whatever it couldn't place (a full inventory leaves it non-empty; anything else leaves it
- * empty), and this class decides what happens next purely from the resulting stack state &mdash;
- * never from {@code Inventory#add}'s own boolean return value, which (per its own contract) is
- * {@code true} even for a partial add. The real call site ({@code giveBoardOrDrop}) wires the
- * actual {@code Inventory#add} and {@code Player#drop} in as {@code receiver}/{@code
- * dropIfAnyLeft}; this class's tests wire in fakes that simulate "inventory full", "inventory has
- * room" and "inventory has partial room" without touching either.
+ * <p>This is deliberately generic over {@code T} rather than typed directly to {@code ItemStack}:
+ * an earlier version of this class (and its test) used a real {@code ItemStack} plus vanilla
+ * {@code Items.STICK} as a stand-in, on the theory that {@code ItemStack}/{@code Items} need
+ * neither a level nor an explicit bootstrap to construct. That theory was wrong &mdash; CI caught
+ * it: referencing {@code Items.*} outside a running NeoForge test/game environment throws {@code
+ * ExceptionInInitializerError}/{@code IllegalArgumentException} during the vanilla registry's own
+ * static init, because that init expects machinery (e.g. {@code Bootstrap.bootStrap()}) this
+ * headless JUnit run never provides. There's no existing fixture or precedent anywhere in this
+ * repo (or any sibling mod repo checked) for constructing {@code ItemStack}/{@code Items} outside
+ * a running game, consistent with every other Minecraft-glue class here never getting its own
+ * entity/item-level test. So this class proves the control-flow invariant &mdash; "whatever the
+ * receiver didn't take gets dropped, nothing is ever silently swallowed" &mdash; against a plain,
+ * self-contained {@code T} instead; {@link LooseSkateboardEntity#giveBoardOrDrop} is the thin,
+ * untested-but-trivial Minecraft-side glue that wires a real {@code ItemStack} through the exact
+ * same shape ({@code Consumer<T>} mutates it, {@code Predicate<T>} reads it back, {@code
+ * Consumer<T>} drops the leftover).
  */
 final class BoardPickupTransfer {
     private BoardPickupTransfer() {}
 
     /**
-     * Hands {@code stack} to {@code receiver}; whatever it didn't take goes to {@code
-     * dropIfAnyLeft} instead of being discarded. Returns {@code true} iff nothing was left to
-     * drop (the item was fully absorbed).
+     * Hands {@code stack} to {@code receiver} (which may mutate it down to whatever it couldn't
+     * place &mdash; mirroring {@code Inventory#add(ItemStack)}'s own contract). Whatever {@code
+     * isEmpty} says is left afterward goes to {@code dropIfAnyLeft} instead of being discarded.
+     * Returns {@code true} iff nothing was left to drop (the item was fully absorbed). Never
+     * trusts a boolean "did you take anything" return from {@code receiver} &mdash; {@code
+     * Inventory#add} returns {@code true} even for a partial add, so only the post-state
+     * ({@code isEmpty}) is trustworthy here.
      */
-    static boolean give(ItemStack stack, Consumer<ItemStack> receiver, Consumer<ItemStack> dropIfAnyLeft) {
+    static <T> boolean give(T stack, Consumer<T> receiver, Predicate<T> isEmpty, Consumer<T> dropIfAnyLeft) {
         receiver.accept(stack);
-        if (!stack.isEmpty()) {
+        if (!isEmpty.test(stack)) {
             dropIfAnyLeft.accept(stack);
             return false;
         }
