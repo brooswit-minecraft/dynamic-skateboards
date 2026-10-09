@@ -115,5 +115,58 @@ public final class SkateConstants {
     /** Ticks after release before the same edge can be re-acquired, avoiding an instant re-snap. */
     public static final int GRIND_REACQUIRE_COOLDOWN_TICKS = 10;
 
+    // --- Bail (story f): rare, config-driven crash into a loose physics board ---
+
+    /**
+     * Impact speed threshold, in blocks/tick (the magnitude of the player's own downward vertical
+     * speed the tick before touchdown resolves it), above which a landing counts as "badly
+     * missed" and forces a bail instead of resuming SKATING. Comfortably above anything a normal
+     * ollie/ramp landing produces &mdash; {@link #OLLIE_MAX_IMPULSE} is only 0.9 blocks/tick
+     * upward, and a symmetric landing from max ollie height returns well under this value &mdash;
+     * so this stays rare by construction: a real miss, a long fall, or a grind run off the end of
+     * a rail with nothing underneath to land on.
+     */
+    public static final double BAIL_IMPACT_SPEED_THRESHOLD = 1.3;
+
+    /** Mass of the loose physics board spawned on a bail, in kg, handed to Sable's rigid body. */
+    public static final double BAIL_BOARD_MASS_KG = 2.5;
+
+    /** Half-length of the loose board's physics box along the deck, in blocks. */
+    public static final double BAIL_BOARD_HALF_LENGTH = 0.4;
+
+    /** Half-width of the loose board's physics box across the deck, in blocks. */
+    public static final double BAIL_BOARD_HALF_WIDTH = 0.1;
+
+    /** Half-height of the loose board's physics box, in blocks. */
+    public static final double BAIL_BOARD_HALF_HEIGHT = 0.05;
+
+    /** Rest length of each of the loose board's four wheel-contact suspension rays, in blocks. */
+    public static final double BAIL_WHEEL_REST_LENGTH = 0.12;
+
+    /** Spring rate of each wheel-contact suspension ray, N/m. Passive only &mdash; no propulsion term exists. */
+    public static final double BAIL_WHEEL_SPRING_RATE = 900.0;
+
+    /** Damping rate of each wheel-contact suspension ray, N per (m/s). */
+    public static final double BAIL_WHEEL_DAMPING_RATE = 60.0;
+
+    /** Clamp on a single wheel-contact's per-tick suspension force, N, so a degenerate compression can't launch the board. */
+    public static final double BAIL_WHEEL_MAX_SPRING_FORCE = 400.0;
+
+    /**
+     * Fraction of the crash's horizontal speed converted into tumbling angular velocity on bail,
+     * in radians/second per block/tick of horizontal speed &mdash; "tumbles plausibly, not
+     * static": a bail with real speed behind it must visibly tumble, not just slide as a flat box.
+     */
+    public static final double BAIL_TUMBLE_SPIN_FACTOR = 6.0;
+
+    /** How far beyond the loose board's own box the walk-over pickup touch check reaches, in blocks. */
+    public static final double BAIL_PICKUP_REACH_BLOCKS = 0.25;
+
+    /** The loose board entity's registered bounding-box width (x/z), in blocks: generous enough to cover any tumble orientation. */
+    public static final float BAIL_BOARD_ENTITY_WIDTH = 0.9f;
+
+    /** The loose board entity's registered bounding-box height, in blocks. */
+    public static final float BAIL_BOARD_ENTITY_HEIGHT = 0.3f;
+
     private SkateConstants() {}
 }

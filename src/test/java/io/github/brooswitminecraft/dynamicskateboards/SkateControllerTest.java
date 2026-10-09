@@ -15,7 +15,12 @@ class SkateControllerTest {
 
     private static SkateInput trick(
             boolean onGround, boolean shift, boolean attackJustPressed, boolean useHeld, TrickDirection direction) {
-        return new SkateInput(true, false, onGround, 0.0, 0.0, shift, attackJustPressed, useHeld, direction);
+        return new SkateInput(true, false, onGround, 0.0, 0.0, shift, attackJustPressed, useHeld, direction, 0.0);
+    }
+
+    /** A touchdown ({@code onGround}) carrying {@code verticalVelocity} blocks/tick of incoming fall speed. */
+    private static SkateInput landing(double verticalVelocity) {
+        return new SkateInput(true, false, true, 0.0, 0.0, false, false, false, TrickDirection.NEUTRAL, verticalVelocity);
     }
 
     private static final class RecordingGrindSeam implements GrindSeam {
@@ -316,5 +321,77 @@ class SkateControllerTest {
         assertTrue(ClickSuppressionPolicy.suppressVanillaClicks(c.state()), "SKATING must suppress");
         c.update(held(false, false, true)); // board leaves hand -> GROUNDED
         assertFalse(ClickSuppressionPolicy.suppressVanillaClicks(c.state()), "suppression must be restored once skating ends");
+    }
+
+    // --- Bail (story f): a badly missed landing forces the loose-board exit, not LANDING ---
+
+    @Test
+    void normalLandingSpeedNeverBails() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        SkateState state = c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD - 0.01));
+        assertEquals(SkateState.LANDING, state, "a landing under the bail threshold must resolve normally");
+        assertFalse(c.takeBailedThisTick());
+    }
+
+    @Test
+    void landingAtOrAboveThresholdBails() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        SkateState state = c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD));
+        assertEquals(SkateState.GROUNDED, state, "a badly missed landing must exit skating, not enter LANDING");
+        assertTrue(c.takeBailedThisTick(), "the bail flag must be set exactly for this tick");
+        assertFalse(c.isSkating());
+    }
+
+    @Test
+    void bailFlagIsConsumedOnce() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true));
+        c.update(held(true, false, false));
+        c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD));
+        assertTrue(c.takeBailedThisTick());
+        assertFalse(c.takeBailedThisTick(), "the flag must not still read true after being taken");
+    }
+
+    @Test
+    void bailDropsAnInProgressFlipInsteadOfCompletingIt() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        c.update(trick(false, false, true, false, TrickDirection.LEFT)); // selects HEELFLIP
+        c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD));
+        assertNull(c.activeFlip(), "a bailed flip must not remain active");
+        assertNull(c.takeCompletedFlip(), "a bailed flip must never report as completed");
+    }
+
+    @Test
+    void bailFromHighSpeedGrindDismountStillTriggersOnTheFollowingTouchdown() {
+        // Models WorldGrindSeam releasing a grind mid-air (ran off the end) and handing the
+        // player back to normal falling physics: the controller stays AIRBORNE, and the very
+        // next touchdown is where this story's bail check lives - no separate grind-specific
+        // bail path is needed.
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE (grind acquired/ridden off-controller)
+        c.update(held(true, false, false)); // still falling after release
+        SkateState state = c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD + 1.0));
+        assertEquals(SkateState.GROUNDED, state);
+        assertTrue(c.takeBailedThisTick());
+    }
+
+    @Test
+    void bailResetsSpeedAndChargeLikeAnyOtherExit() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true));
+        c.update(held(true, true, true)); // CHARGING, so chargeTicks advances
+        c.update(held(true, true, true));
+        c.update(held(true, false, false)); // released into AIRBORNE (ollie)
+        c.update(landing(SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD));
+        assertEquals(0, c.chargeTicks());
+        assertEquals(0.0, c.speed(), 1e-9);
+        assertNull(c.activeGrab());
     }
 }
