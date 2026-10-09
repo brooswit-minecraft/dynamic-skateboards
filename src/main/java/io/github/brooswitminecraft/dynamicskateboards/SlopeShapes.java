@@ -74,14 +74,19 @@ public final class SlopeShapes {
     /**
      * Rotates south-authored voxel boxes about the Y axis, {@code steps} times, matching
      * {@link Direction#get2DDataValue()} (SOUTH=0, WEST=1, NORTH=2, EAST=3): each step applies
-     * (x,z) -&gt; (z, 16-x).
+     * (x,z) -&gt; (16-z, x) — i.e. south's exit face (high z) rotates to WEST's own forward face
+     * (low x) after one step, and to EAST's own forward face (high x) after three. Verified
+     * directly against {@code Direction.getStepX()/getStepZ()} (not just assumed): the other
+     * rotation handedness, (x,z) -&gt; (z, 16-x), silently swaps EAST and WEST — 180-degree
+     * rotation (NORTH) looks correct either way, which is exactly why this is easy to get backwards
+     * without checking the odd step counts against the real direction vectors.
      */
     static List<int[]> rotate(List<int[]> boxes, int steps) {
         List<int[]> current = boxes;
         for (int i = 0; i < ((steps % 4) + 4) % 4; i++) {
             List<int[]> next = new ArrayList<>();
             for (int[] b : current) {
-                next.add(new int[] {b[2], b[1], 16 - b[3], b[5], b[4], 16 - b[0]});
+                next.add(new int[] {16 - b[5], b[1], b[0], 16 - b[2], b[4], b[3]});
             }
             current = next;
         }
