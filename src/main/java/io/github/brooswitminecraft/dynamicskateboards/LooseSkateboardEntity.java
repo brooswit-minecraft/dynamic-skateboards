@@ -35,7 +35,9 @@ import net.minecraft.world.phys.AABB;
  * {@link LooseBoardClaim} (see that class for why the single-threaded server tick already makes
  * this race-safe, and why the latch exists anyway) before handing the skateboard item back and
  * discarding itself &mdash; no keybind, no interact prompt, matching the spec's "collects it like
- * a dropped item" requirement.
+ * a dropped item" requirement. Claims are refused for {@link SkateConstants#BAIL_PICKUP_GRACE_TICKS}
+ * ticks after spawn (review fix) so the bailing player, who spawns the board right under their own
+ * feet, actually sees it come loose instead of it returning to their inventory the very next tick.
  */
 public class LooseSkateboardEntity extends Entity {
     private static final EntityDataAccessor<Quaternionf> DATA_ORIENTATION =
@@ -45,6 +47,12 @@ public class LooseSkateboardEntity extends Entity {
     private Object sableBody;
     private Quaternionf savedOrientation;
     private Vector3d initialTumbleAxis = new Vector3d(1, 0, 0);
+    /**
+     * Server ticks this loose board has been alive, counted by us (not vanilla's inherited
+     * {@code tickCount}, which this class never relies on) so {@link #tryPickup} has something
+     * precise to gate {@link SkateConstants#BAIL_PICKUP_GRACE_TICKS} against.
+     */
+    private int ticksAlive;
 
     public LooseSkateboardEntity(EntityType<? extends LooseSkateboardEntity> type, Level level) {
         super(type, level);
@@ -101,6 +109,7 @@ public class LooseSkateboardEntity extends Entity {
             return;
         }
         if (level() instanceof ServerLevel serverLevel) {
+            ticksAlive++;
             if (SkateboardSableCompat.usable()) {
                 tickSable(serverLevel);
             } else {
@@ -144,7 +153,13 @@ public class LooseSkateboardEntity extends Entity {
         move(MoverType.SELF, getDeltaMovement());
     }
 
-    /** Walk-over pickup: no keybind, no interact prompt. See the class javadoc for the race-safety argument. */
+    /**
+     * Walk-over pickup: no keybind, no interact prompt. See the class javadoc for the race-safety
+     * argument. Refuses every claim for {@link SkateConstants#BAIL_PICKUP_GRACE_TICKS} ticks after
+     * spawn (review fix) so the bailing player &mdash; standing right where the board spawned
+     * &mdash; doesn't re-pickup it on the very next tick; the latch stays open through the grace
+     * window, so the first real claim after it still wins normally.
+     */
     private void tryPickup() {
         if (claim.isClaimed()) {
             return;
@@ -152,12 +167,28 @@ public class LooseSkateboardEntity extends Entity {
         AABB reach = getBoundingBox().inflate(SkateConstants.BAIL_PICKUP_REACH_BLOCKS);
         List<Player> touching = level().getEntitiesOfClass(Player.class, reach);
         for (Player player : touching) {
-            if (claim.tryClaim()) {
-                player.getInventory().add(new ItemStack(DynamicSkateboardsMod.SKATEBOARD.get()));
+            if (claim.tryClaim(ticksAlive, SkateConstants.BAIL_PICKUP_GRACE_TICKS)) {
+                giveBoardOrDrop(player);
                 discard();
                 return;
             }
         }
+    }
+
+    /**
+     * Review fix (item loss): {@code Inventory.add} mutates the passed stack down to whatever it
+     * couldn't take, so a full inventory can leave a non-empty remainder even though {@code add}
+     * itself didn't throw (its boolean return is {@code true} even for a partial add, so it can't
+     * be trusted here &mdash; see {@link BoardPickupTransfer}). We always finish the pickup
+     * (claim/discard) once a player has walked over the board &mdash; "the board is handled" per
+     * spec &mdash; but never let the item itself vanish: anything {@code add} couldn't place goes
+     * on the ground at the player's feet instead of into the void. The actual decision logic
+     * lives in {@link BoardPickupTransfer}, which is unit-tested directly against fakes standing
+     * in for a full/partial/empty inventory.
+     */
+    private static void giveBoardOrDrop(Player player) {
+        ItemStack stack = new ItemStack(DynamicSkateboardsMod.SKATEBOARD.get());
+        BoardPickupTransfer.give(stack, s -> player.getInventory().add(s), s -> player.drop(s, false));
     }
 
     @Override
@@ -176,6 +207,15 @@ public class LooseSkateboardEntity extends Entity {
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         savedOrientation = LooseSkateboardPersistence.read(tag);
+        // Review fix (position persistence): vanilla Entity#load already restored position from
+        // its own "Pos" tag before this method runs; this is a redundant, explicit re-apply from
+        // our own tag so the guarantee is backed by something LooseSkateboardPersistenceTest can
+        // assert without a running Level (see that class's javadoc for why vanilla's own path
+        // isn't directly testable here).
+        net.minecraft.world.phys.Vec3 explicitPos = LooseSkateboardPersistence.readPosition(tag);
+        if (explicitPos != null) {
+            setPos(explicitPos.x, explicitPos.y, explicitPos.z);
+        }
     }
 
     @Override
@@ -191,6 +231,7 @@ public class LooseSkateboardEntity extends Entity {
         if (q != null) {
             LooseSkateboardPersistence.write(tag, q);
         }
+        LooseSkateboardPersistence.writePosition(tag, position());
     }
 
     @Override

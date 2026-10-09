@@ -71,20 +71,30 @@ class BailRoundTripTest {
     }
 
     @Test
-    void chunkUnloadReloadPersistencePreservesOrientation() {
+    void chunkUnloadReloadPersistencePreservesOrientationAndPosition() {
         // See LooseSkateboardPersistenceTest for the dedicated NBT round-trip coverage; this just
         // confirms the same guarantee holds as part of the end-to-end story, not only in isolation.
+        // Review fix: position is now asserted here too, not just orientation - a loose board
+        // that comes back from an unload at the wrong spot is just as broken as one with the
+        // wrong tumble.
         org.joml.Quaternionf orientation = new org.joml.Quaternionf(0.0f, 0.0f, 0.38268346f, 0.92387953f); // 45 degrees
+        net.minecraft.world.phys.Vec3 position = new net.minecraft.world.phys.Vec3(12.0, 70.0, -5.5);
         net.minecraft.nbt.CompoundTag saved = new net.minecraft.nbt.CompoundTag();
         LooseSkateboardPersistence.write(saved, orientation);
+        LooseSkateboardPersistence.writePosition(saved, position);
 
         // Simulate the unload/reload boundary: nothing survives except the tag itself.
         net.minecraft.nbt.CompoundTag reloaded = saved.copy();
 
-        org.joml.Quaternionf restored = LooseSkateboardPersistence.read(reloaded);
-        assertEquals(orientation.x, restored.x, 1e-6f);
-        assertEquals(orientation.y, restored.y, 1e-6f);
-        assertEquals(orientation.z, restored.z, 1e-6f);
-        assertEquals(orientation.w, restored.w, 1e-6f);
+        org.joml.Quaternionf restoredOrientation = LooseSkateboardPersistence.read(reloaded);
+        assertEquals(orientation.x, restoredOrientation.x, 1e-6f);
+        assertEquals(orientation.y, restoredOrientation.y, 1e-6f);
+        assertEquals(orientation.z, restoredOrientation.z, 1e-6f);
+        assertEquals(orientation.w, restoredOrientation.w, 1e-6f);
+
+        net.minecraft.world.phys.Vec3 restoredPosition = LooseSkateboardPersistence.readPosition(reloaded);
+        assertEquals(position.x, restoredPosition.x, 1e-9);
+        assertEquals(position.y, restoredPosition.y, 1e-9);
+        assertEquals(position.z, restoredPosition.z, 1e-9);
     }
 }

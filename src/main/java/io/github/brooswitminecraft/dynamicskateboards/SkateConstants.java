@@ -162,6 +162,15 @@ public final class SkateConstants {
     /** How far beyond the loose board's own box the walk-over pickup touch check reaches, in blocks. */
     public static final double BAIL_PICKUP_REACH_BLOCKS = 0.25;
 
+    /**
+     * Ticks after spawn a loose board refuses every pickup claim, win or lose &mdash; the bailing
+     * player is standing on top of the spot it spawns at, so without this it would return to their
+     * inventory within the same tick and they'd never see it come loose. 12 ticks = 0.6s: long
+     * enough to read as "the board fell off and is lying there" even though the player hasn't
+     * moved away yet, short enough that a player who immediately wants it back isn't kept waiting.
+     */
+    public static final int BAIL_PICKUP_GRACE_TICKS = 12;
+
     /** The loose board entity's registered bounding-box width (x/z), in blocks: generous enough to cover any tumble orientation. */
     public static final float BAIL_BOARD_ENTITY_WIDTH = 0.9f;
 
