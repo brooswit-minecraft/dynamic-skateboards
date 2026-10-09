@@ -13,6 +13,21 @@ class SkateControllerTest {
         return new SkateInput(board, jump, onGround, 0.0, 0.0);
     }
 
+    private static SkateInput trick(
+            boolean onGround, boolean shift, boolean attackJustPressed, boolean useHeld, TrickDirection direction) {
+        return new SkateInput(true, false, onGround, 0.0, 0.0, shift, attackJustPressed, useHeld, direction);
+    }
+
+    private static final class RecordingGrindSeam implements GrindSeam {
+        private boolean called;
+
+        @Override
+        public boolean tryGrind(SkateInput input) {
+            called = true;
+            return false;
+        }
+    }
+
     @Test
     void mainHandEntersSkating() {
         SkateController c = new SkateController();
@@ -146,5 +161,160 @@ class SkateControllerTest {
             finalState = c.update(held(true, false, true));
         }
         assertEquals(SkateState.CHARGING, finalState, "buffered jump should start charging the moment landing completes");
+    }
+
+    // --- Shift contextual dispatch: ride -> MANUAL, airborne/approaching -> grind seam ---
+
+    @Test
+    void shiftWhileRidingEntersManual() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        SkateState state = c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
+        assertEquals(SkateState.MANUAL, state);
+    }
+
+    @Test
+    void releasingShiftWhileManualReturnsToSkating() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)); // MANUAL
+        SkateState state = c.update(trick(true, false, false, false, TrickDirection.NEUTRAL));
+        assertEquals(SkateState.SKATING, state);
+    }
+
+    @Test
+    void manualGoesAirborneIfGroundDisappears() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)); // MANUAL
+        SkateState state = c.update(trick(false, true, false, false, TrickDirection.NEUTRAL));
+        assertEquals(SkateState.AIRBORNE, state);
+    }
+
+    @Test
+    void shiftWhileAirborneRoutesToGrindSeamNotManual() {
+        RecordingGrindSeam seam = new RecordingGrindSeam();
+        SkateController c = new SkateController(seam);
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        SkateState state = c.update(trick(false, true, false, false, TrickDirection.NEUTRAL));
+        assertTrue(seam.called, "Shift while AIRBORNE must route to the grind seam");
+        assertEquals(SkateState.AIRBORNE, state, "the no-op seam must not itself change state");
+        assertFalse(state == SkateState.MANUAL, "airborne Shift must never become MANUAL");
+    }
+
+    @Test
+    void shiftWhileAirborneNeverCallsSeamWhileRiding() {
+        RecordingGrindSeam seam = new RecordingGrindSeam();
+        SkateController c = new SkateController(seam);
+        c.update(held(true, false, true)); // SKATING
+        c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)); // MANUAL via Shift
+        assertFalse(seam.called, "Shift while riding must go to MANUAL, not the grind seam");
+    }
+
+    // --- FLIP family: left click + direction ---
+
+    @Test
+    void leftClickSelectsExpectedFlipPerDirection() {
+        for (TrickDirection direction : TrickDirection.values()) {
+            SkateController c = new SkateController();
+            c.update(held(true, false, true)); // SKATING
+            c.update(held(true, false, false)); // AIRBORNE
+            c.update(trick(false, false, true, false, direction));
+            assertEquals(TrickTable.flipFor(direction), c.activeFlip(),
+                    "direction " + direction + " must select its table flip");
+        }
+    }
+
+    @Test
+    void flipLandsAfterLandingTolerance() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        c.update(trick(false, false, true, false, TrickDirection.LEFT)); // selects HEELFLIP
+        c.update(held(true, false, true)); // touches down -> LANDING
+        FlipTrick landed = null;
+        for (int i = 1; i <= SkateConstants.LANDING_TOLERANCE_TICKS; i++) {
+            FlipTrick taken = c.update(held(true, false, true)) == SkateState.SKATING ? c.takeCompletedFlip() : null;
+            if (taken != null) {
+                landed = taken;
+            }
+        }
+        assertEquals(FlipTrick.HEELFLIP, landed, "the selected flip must be reported landed once LANDING completes");
+    }
+
+    @Test
+    void flipPressSlightlyBeforeTakeoffIsStillRecognized() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(trick(true, false, true, false, TrickDirection.FORWARD)); // press while still grounded
+        c.update(held(true, false, true)); // one more grounded tick, well within the window
+        c.update(held(true, false, false)); // leaves the ground -> AIRBORNE (dispatched from SKATING, no consume yet)
+        c.update(held(true, false, false)); // first tick dispatched AS AIRBORNE: consumes the buffered press
+        assertEquals(TrickTable.flipFor(TrickDirection.FORWARD), c.activeFlip(),
+                "a press a couple of ticks before takeoff must still land the intended trick");
+    }
+
+    @Test
+    void flipPressTooEarlyIsDroppedOutsideTheWindow() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(trick(true, false, true, false, TrickDirection.FORWARD)); // press while grounded
+        for (int i = 0; i < SkateConstants.INPUT_BUFFER_WINDOW_TICKS + 2; i++) {
+            c.update(held(true, false, true)); // stay grounded well past the window
+        }
+        c.update(held(true, false, false)); // leaves the ground -> AIRBORNE, long after the window elapsed
+        c.update(held(true, false, false)); // first tick dispatched AS AIRBORNE: nothing left to consume
+        assertNull(c.activeFlip(), "a press outside the buffer window must be dropped, not recognized late");
+    }
+
+    // --- GRAB family: right click (held) + direction ---
+
+    @Test
+    void rightClickSelectsExpectedGrabPerDirection() {
+        for (TrickDirection direction : TrickDirection.values()) {
+            SkateController c = new SkateController();
+            c.update(held(true, false, true)); // SKATING
+            c.update(held(true, false, false)); // AIRBORNE
+            c.update(trick(false, false, false, true, direction));
+            assertEquals(TrickTable.grabFor(direction), c.activeGrab(),
+                    "direction " + direction + " must select its table grab");
+        }
+    }
+
+    @Test
+    void grabSustainsWhileHeldAndEndsOnRelease() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        c.update(trick(false, false, false, true, TrickDirection.BACK));
+        assertEquals(GrabTrick.TAIL, c.activeGrab());
+        c.update(trick(false, false, false, true, TrickDirection.BACK)); // still held
+        assertEquals(GrabTrick.TAIL, c.activeGrab(), "grab must sustain while held");
+        c.update(trick(false, false, false, false, TrickDirection.BACK)); // released
+        assertNull(c.activeGrab(), "grab must end on release");
+    }
+
+    @Test
+    void grabEndsWhenLeavingAirborneEvenIfStillHeld() {
+        SkateController c = new SkateController();
+        c.update(held(true, false, true)); // SKATING
+        c.update(held(true, false, false)); // AIRBORNE
+        c.update(trick(false, false, false, true, TrickDirection.RIGHT));
+        assertEquals(GrabTrick.CRAIL, c.activeGrab());
+        c.update(trick(true, false, false, true, TrickDirection.RIGHT)); // touches down, still "held"
+        assertNull(c.activeGrab(), "a grab must not survive past AIRBORNE even if the button is still held");
+    }
+
+    // --- Vanilla click suppression (pure decision; wiring is Minecraft glue, untestable here) ---
+
+    @Test
+    void clicksAreSuppressedWhileSkatingAndRestoredWhenGrounded() {
+        SkateController c = new SkateController();
+        assertFalse(ClickSuppressionPolicy.suppressVanillaClicks(c.state()), "GROUNDED must not suppress");
+        c.update(held(true, false, true)); // SKATING
+        assertTrue(ClickSuppressionPolicy.suppressVanillaClicks(c.state()), "SKATING must suppress");
+        c.update(held(false, false, true)); // board leaves hand -> GROUNDED
+        assertFalse(ClickSuppressionPolicy.suppressVanillaClicks(c.state()), "suppression must be restored once skating ends");
     }
 }
