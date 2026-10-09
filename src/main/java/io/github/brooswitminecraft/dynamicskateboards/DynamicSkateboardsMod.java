@@ -213,6 +213,13 @@ public class DynamicSkateboardsMod {
                     mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
                     trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction));
 
+            // Review fix: a grind active the tick riding goes GROUNDED outright (board
+            // unequipped mid-grind, etc.) must be dropped here - tick() below only ever runs
+            // while non-GROUNDED, so without this a stale follower would silently resume (and
+            // teleport the player back onto the old path) the next time they mount and go
+            // airborne.
+            grindSeam.clearIfNotRiding(newState != SkateState.GROUNDED);
+
             if (newState != SkateState.GROUNDED) {
                 if (grindSeam.isGrinding()) {
                     // Overrides position/velocity directly along the acquired edge; never also
@@ -265,6 +272,22 @@ public class DynamicSkateboardsMod {
             }
             SkateState state = SYNC_POLICY.stateToSendOnStartTracking(target.getUUID());
             PacketDistributor.sendToPlayer(tracker, new SkatingStatePayload(target.getUUID(), state));
+        }
+
+        /**
+         * Death/dimension-change respawn repositions the player outright; any grind active at
+         * that moment is exactly the same stale-follower hazard {@link #serverPlayerTick}'s
+         * {@code clearIfNotRiding} call fixes for GROUNDED, so drop it here too rather than let
+         * it resume relative to wherever the respawn moved the player.
+         */
+        @SubscribeEvent
+        public static void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
+            if (event.getEntity() instanceof ServerPlayer player) {
+                WorldGrindSeam grindSeam = GRIND_SEAMS.get(player.getUUID());
+                if (grindSeam != null) {
+                    grindSeam.clearIfNotRiding(false);
+                }
+            }
         }
 
         @SubscribeEvent

@@ -12,7 +12,8 @@ import net.minecraft.world.phys.Vec3;
  * Story (e)'s real {@link GrindSeam}: one instance per online player (see
  * {@code DynamicSkateboardsMod.ServerEvents}), holding just enough live state to detect, acquire
  * and follow a grind on top of the pure {@link GrindEdgeDetector}/{@link GrindAcquisition}/
- * {@link GrindFollower} classes those classes don't know Minecraft exists.
+ * {@link GrindFollower}/{@link GrindSession} classes &mdash; those classes don't know Minecraft
+ * exists.
  *
  * <p>{@link #tryGrind} is the {@link GrindSeam} contract method: {@code SkateController} calls it
  * once per tick while AIRBORNE and Shift is held, and it only ever ACQUIRES &mdash; see that
@@ -22,32 +23,42 @@ import net.minecraft.world.phys.Vec3;
  * calling {@link #tick} every tick a grind is active, independent of the {@code GrindSeam}
  * plumbing. {@link #prepare} must be called once per tick, before {@code SkateController.update},
  * so {@link #tryGrind} has a live player/level reference to query.
+ *
+ * <p>{@link #clearIfNotRiding} closes the gap a formal review caught: {@code tick} only ever runs
+ * while {@code SkateController}'s state is non-GROUNDED, so a grind that's active the tick the
+ * skater goes GROUNDED outright (board unequipped mid-grind, or any other reason riding ends) was
+ * never told to stop &mdash; {@link #isGrinding} stayed {@code true} with a stale
+ * {@code GrindFollower}, silently resumed (teleporting the player back onto the old path) the
+ * next time they mounted and went airborne. {@code ServerEvents} must call it every tick with
+ * whatever {@code SkateController}'s own state says, GROUNDED or not.
  */
 public final class WorldGrindSeam implements GrindSeam {
     private ServerPlayer preparedPlayer;
-    private GrindFollower follower;
-    private int cooldownTicksRemaining;
+    private final GrindSession session = new GrindSession();
 
     /** Call once per player per tick, before {@code SkateController#update}. */
     public void prepare(ServerPlayer player) {
         this.preparedPlayer = player;
-        if (cooldownTicksRemaining > 0) {
-            cooldownTicksRemaining--;
-        }
+        session.tickCooldown();
     }
 
     public boolean isGrinding() {
-        return follower != null;
+        return session.isActive();
+    }
+
+    /** See the class javadoc: must be called every tick with {@code SkateController}'s own state. */
+    public void clearIfNotRiding(boolean currentlyRiding) {
+        session.onRidingStateChanged(currentlyRiding);
     }
 
     @Override
     public boolean tryGrind(SkateInput input) {
-        if (follower != null) {
+        if (session.isActive()) {
             // Already grinding; this tick's actual following/release is ServerEvents' job via
             // tick(), not this acquisition-only contract method. Keep reporting "engaged."
             return true;
         }
-        if (preparedPlayer == null || cooldownTicksRemaining > 0) {
+        if (preparedPlayer == null || !session.canAcquire()) {
             return false;
         }
 
@@ -65,7 +76,7 @@ public final class WorldGrindSeam implements GrindSeam {
 
         double distanceAlong = chosen.nearestDistanceAlong(playerPos);
         int travelSign = GrindAcquisition.travelSignAt(chosen, distanceAlong, input.facingHeadingDegrees());
-        follower = new GrindFollower(chosen, distanceAlong, travelSign);
+        session.start(new GrindFollower(chosen, distanceAlong, travelSign));
         preparedPlayer.displayClientMessage(Component.literal("Grinding"), true);
         return true;
     }
@@ -79,6 +90,7 @@ public final class WorldGrindSeam implements GrindSeam {
      * touching {@code SkateController} at all.
      */
     public void tick(ServerPlayer player, double speedBlocksPerTick, boolean shiftHeld, boolean jumpHeld) {
+        GrindFollower follower = session.current();
         if (follower == null) {
             return;
         }
@@ -90,8 +102,7 @@ public final class WorldGrindSeam implements GrindSeam {
             Vec3 exitHorizontal = horizontalVelocityFor(step.headingDegrees(), speedBlocksPerTick);
             double verticalVelocity = jumpHeld ? SkateConstants.OLLIE_MIN_IMPULSE : 0.0;
             player.setDeltaMovement(new Vec3(exitHorizontal.x, verticalVelocity, exitHorizontal.z));
-            follower = null;
-            cooldownTicksRemaining = SkateConstants.GRIND_REACQUIRE_COOLDOWN_TICKS;
+            session.release();
         } else {
             Vec3 horizontal = horizontalVelocityFor(step.headingDegrees(), speedBlocksPerTick);
             player.setDeltaMovement(new Vec3(horizontal.x, 0.0, horizontal.z));
