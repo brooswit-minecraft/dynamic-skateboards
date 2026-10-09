@@ -1,4 +1,16 @@
 {
+  "block.dynamicskateboards.curved_step": "Curved Step",
+  "block.dynamicskateboards.curved_wall": "Curved Wall",
+  "block.dynamicskateboards.raised_shallow_slope": "Raised Shallow Slope",
+  "block.dynamicskateboards.raised_shallow_slope_inverted": "Raised Shallow Slope (Inverted)",
+  "block.dynamicskateboards.raised_steep_slope": "Raised Steep Slope",
+  "block.dynamicskateboards.raised_steep_slope_inverted": "Raised Steep Slope (Inverted)",
+  "block.dynamicskateboards.regular_slope": "Regular Slope",
+  "block.dynamicskateboards.regular_slope_inverted": "Regular Slope (Inverted)",
+  "block.dynamicskateboards.shallow_slope": "Shallow Slope",
+  "block.dynamicskateboards.shallow_slope_inverted": "Shallow Slope (Inverted)",
+  "block.dynamicskateboards.steep_slope": "Steep Slope",
+  "block.dynamicskateboards.steep_slope_inverted": "Steep Slope (Inverted)",
   "item.dynamicskateboards.skateboard": "Skateboard",
   "itemGroup.dynamicskateboards": "Dynamic Skateboards"
 }

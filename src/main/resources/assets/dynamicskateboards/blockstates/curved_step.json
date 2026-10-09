@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "chamfer_side=right,facing=south": {
+      "model": "dynamicskateboards:block/curved_step_right_south"
+    },
+    "chamfer_side=right,facing=west": {
+      "model": "dynamicskateboards:block/curved_step_right_west"
+    },
+    "chamfer_side=right,facing=north": {
+      "model": "dynamicskateboards:block/curved_step_right_north"
+    },
+    "chamfer_side=right,facing=east": {
+      "model": "dynamicskateboards:block/curved_step_right_east"
+    },
+    "chamfer_side=left,facing=south": {
+      "model": "dynamicskateboards:block/curved_step_left_south"
+    },
+    "chamfer_side=left,facing=west": {
+      "model": "dynamicskateboards:block/curved_step_left_west"
+    },
+    "chamfer_side=left,facing=north": {
+      "model": "dynamicskateboards:block/curved_step_left_north"
+    },
+    "chamfer_side=left,facing=east": {
+      "model": "dynamicskateboards:block/curved_step_left_east"
+    }
+  }
+}

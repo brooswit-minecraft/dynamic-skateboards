@@ -104,6 +104,16 @@ dependencies {
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
+// The neoForge DSL only wires Minecraft/NeoForge onto the `main` sourceSet's compile classpath
+// (via `mods { "${mod_id}" { sourceSet(sourceSets.main) } }` above); the default Java plugin
+// wiring (testImplementation extends implementation) doesn't carry that across, so tests that
+// import Minecraft classes (e.g. VoxelShape, Direction — see SlopeShapesTest/CurvedShapesTest)
+// need it added explicitly.
+sourceSets.test {
+    compileClasspath += sourceSets.main.compileClasspath
+    runtimeClasspath += sourceSets.main.runtimeClasspath
+}
+
 test {
     useJUnitPlatform()
 }
