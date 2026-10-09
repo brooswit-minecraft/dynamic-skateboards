@@ -37,9 +37,16 @@ public final class SlopeShapes {
 
     public static final double VOXEL = 1.0 / 16.0;
 
-    /** Stepped (1/16-voxel) height of the ramp surface at column {@code col} (0..15), 0..riseVoxels. */
+    /**
+     * Stepped (1/16-voxel) height of the ramp surface at column {@code col} (0..15), 0..riseVoxels.
+     * Uses floor, not round: that guarantees column 0 is always exactly 0 and column 15 is always
+     * exactly {@code riseVoxels} (for any {@code riseVoxels < 16}), so two ramps placed side by
+     * side with matching shift/exit values butt together with EXACTLY zero gap or overlap at
+     * their shared face — round would occasionally round column 0 up by a voxel (e.g. rise=8),
+     * which is precisely the seam this geometry exists to avoid.
+     */
     static int stepHeight(int col, int riseVoxels) {
-        return (int) Math.round((col + 1) * riseVoxels / 16.0);
+        return (int) Math.floor((col + 1) * riseVoxels / 16.0);
     }
 
     /** One south-facing solid box per column, in voxel units [x0,y0,z0,x1,y1,z1]. */

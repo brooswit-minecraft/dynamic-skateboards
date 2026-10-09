@@ -1,5 +1,6 @@
 package io.github.brooswitminecraft.dynamicskateboards;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +50,65 @@ class CurvedShapesTest {
         assertTrue(CurvedShapes.CHAMFER_ANGLE_DEGREES > 0.0, "a curved piece must actually turn");
         assertTrue(CurvedShapes.CHAMFER_ANGLE_DEGREES < 45.0,
                 "one piece's turn (" + CurvedShapes.CHAMFER_ANGLE_DEGREES + " deg) must be well short of a 90-degree jog");
+    }
+
+    /**
+     * What chaining several identical pieces end to end along the run axis (same facing, same
+     * {@link ChamferSide}) actually gives: NOT an accumulating arc. Each block's taper is
+     * authored in that block's own 0..16 local frame and always restarts there, so the global
+     * depth profile along a chain of N blocks is exactly periodic with period 16 (one block) —
+     * the same {@link CurvedShapes#CHAMFER_ANGLE_DEGREES}-ish bevel repeats at every block
+     * boundary instead of compounding into a larger-radius curve. See docs/grindable-edges.md for
+     * what this means for building an actual turn (the bevel softens a single 90-degree grid
+     * joint between two differently-FACING pieces; it does not, by itself, replace a long chain
+     * of jogs with a smooth arc).
+     */
+    @Test
+    void chainingIdenticalPiecesAlongTheRunDoesNotAccumulateATurn() {
+        for (int height : HEIGHTS) {
+            for (ChamferSide side : ChamferSide.values()) {
+                VoxelShape south = CurvedShapes.buildFacingShapes(height, side).get(Direction.SOUTH);
+                double[] onePeriod = sampleDepthProfile(south);
+
+                int chainLength = 5;
+                for (int block = 1; block < chainLength; block++) {
+                    // A fresh block placed next in the chain recomputes the identical shape —
+                    // there is no block-to-block state to carry an accumulating offset forward.
+                    VoxelShape repeated = CurvedShapes.buildFacingShapes(height, side).get(Direction.SOUTH);
+                    double[] repeatedPeriod = sampleDepthProfile(repeated);
+                    for (int x = 0; x < 16; x++) {
+                        assertEquals(onePeriod[x], repeatedPeriod[x], EPS,
+                                height + " " + side + " block " + block + " column " + x
+                                        + " must repeat the same local depth, not continue accumulating");
+                    }
+                }
+
+                double maxDepth = 0;
+                double minDepth = Double.POSITIVE_INFINITY;
+                for (double d : onePeriod) {
+                    maxDepth = Math.max(maxDepth, d);
+                    minDepth = Math.min(minDepth, d);
+                }
+                double excursionVoxels = (maxDepth - minDepth) * 16.0;
+                assertEquals(CurvedShapes.TAPER_VOXELS, Math.round(excursionVoxels),
+                        height + " " + side + ": the per-block excursion (the only \"radius\" this chain gives) must stay bounded, not grow with chain length");
+            }
+        }
+    }
+
+    private static double[] sampleDepthProfile(VoxelShape south) {
+        double[] depths = new double[16];
+        for (int x = 0; x < 16; x++) {
+            double sampleX = (x + 0.5) / 16.0;
+            double depth = -1;
+            for (AABB box : south.toAabbs()) {
+                if (box.minX <= sampleX && sampleX <= box.maxX) {
+                    depth = Math.max(depth, box.maxZ);
+                }
+            }
+            depths[x] = depth;
+        }
+        return depths;
     }
 
     /**
