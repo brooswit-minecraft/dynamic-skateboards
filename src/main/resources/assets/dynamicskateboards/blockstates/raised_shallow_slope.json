@@ -1,0 +1,16 @@
+{
+  "variants": {
+    "facing=south": {
+      "model": "dynamicskateboards:block/raised_shallow_slope_south"
+    },
+    "facing=west": {
+      "model": "dynamicskateboards:block/raised_shallow_slope_west"
+    },
+    "facing=north": {
+      "model": "dynamicskateboards:block/raised_shallow_slope_north"
+    },
+    "facing=east": {
+      "model": "dynamicskateboards:block/raised_shallow_slope_east"
+    }
+  }
+}

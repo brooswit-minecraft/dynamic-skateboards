@@ -1,0 +1,16 @@
+{
+  "variants": {
+    "facing=south": {
+      "model": "dynamicskateboards:block/steep_slope_inverted_south"
+    },
+    "facing=west": {
+      "model": "dynamicskateboards:block/steep_slope_inverted_west"
+    },
+    "facing=north": {
+      "model": "dynamicskateboards:block/steep_slope_inverted_north"
+    },
+    "facing=east": {
+      "model": "dynamicskateboards:block/steep_slope_inverted_east"
+    }
+  }
+}
