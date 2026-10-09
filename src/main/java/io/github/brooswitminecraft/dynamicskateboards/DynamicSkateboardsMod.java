@@ -30,6 +30,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.MovementInputUpdateEvent;
 import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
@@ -351,6 +352,23 @@ public class DynamicSkateboardsMod {
         @SubscribeEvent
         public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
             SkateClientState.clearAll();
+        }
+
+        /**
+         * VANILLA SNEAK SUPPRESSION: Shift's raw keybinding state is read above for this mod's own
+         * purposes (manual/grind dispatch), but that same physical key independently drives
+         * vanilla's OWN sneak input path &mdash; avoiding Minecraft's sneak-state setter is not
+         * enough by itself if the vanilla INPUT still sneaks. Clear it here, after everything else
+         * has already read it, only while the client's own mirror of this player's state is
+         * non-GROUNDED; restored automatically the instant that mirror reports GROUNDED again, same
+         * restoration shape as {@link ClickSuppressionPolicy}.
+         */
+        @SubscribeEvent
+        public static void onMovementInput(MovementInputUpdateEvent event) {
+            SkateState state = SkateClientState.state(event.getEntity().getUUID());
+            if (SneakSuppressionPolicy.suppressVanillaSneak(state)) {
+                event.getInput().shiftKeyDown = false;
+            }
         }
     }
 }

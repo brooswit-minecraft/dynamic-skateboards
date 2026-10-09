@@ -18,3 +18,9 @@ bump: minor
   `AttackEntityEvent`/`PlayerInteractEvent.LeftClickBlock`/`RightClickBlock`/`RightClickItem`.
 - `SkateTrickInputPayload`: continuous client-to-server mirror of Shift/attack/use/WASD, same
   no-new-keybind pattern as `SkateJumpInputPayload`.
+
+### Fixed
+- Vanilla sneak no longer engages from the Shift key while skating: `MovementInputUpdateEvent`
+  clears `Input.shiftKeyDown` client-side (after this mod's own payload has already read it)
+  whenever the client's skate-state mirror is non-GROUNDED, restored automatically at GROUNDED.
+  Decision is `SneakSuppressionPolicy`, pure and unit-tested, same shape as `ClickSuppressionPolicy`.
