@@ -24,6 +24,12 @@ package io.github.brooswitminecraft.dynamicskateboards;
  *     and ends on release, so this is a level, not an edge.
  * @param direction the W/A/S/D direction this tick resolves to (see {@link TrickDirection}),
  *     selecting which flip/grab the table maps left/right click to.
+ * @param verticalVelocity the player's own vertical speed, in blocks/tick, from the tick
+ *     immediately BEFORE this one &mdash; i.e. the fall speed the moment before touchdown
+ *     resolves it, not this tick's already-landed value (which Minecraft's own collision
+ *     resolution has typically already zeroed out by the time the caller can read it). Used only
+ *     to detect a badly missed landing (see {@link SkateConstants#BAIL_IMPACT_SPEED_THRESHOLD});
+ *     the convenience constructor below defaults it to 0.0 for every caller that doesn't care.
  */
 public record SkateInput(
         boolean mainHandIsSkateboard,
@@ -34,7 +40,8 @@ public record SkateInput(
         boolean shiftHeld,
         boolean attackJustPressed,
         boolean useHeld,
-        TrickDirection direction) {
+        TrickDirection direction,
+        double verticalVelocity) {
 
     /** Convenience for callers that only care about riding (no trick/manual input this tick). */
     public SkateInput(
@@ -44,6 +51,6 @@ public record SkateInput(
             double observedHorizontalSpeed,
             double facingHeadingDegrees) {
         this(mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
-                false, false, false, TrickDirection.NEUTRAL);
+                false, false, false, TrickDirection.NEUTRAL, 0.0);
     }
 }

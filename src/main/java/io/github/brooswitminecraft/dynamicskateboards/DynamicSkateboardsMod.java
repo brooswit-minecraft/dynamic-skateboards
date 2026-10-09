@@ -10,12 +10,17 @@ import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
@@ -30,6 +35,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.MovementInputUpdateEvent;
 import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
@@ -40,6 +46,7 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.registries.DeferredBlock;
+import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -60,6 +67,20 @@ public class DynamicSkateboardsMod {
             ITEMS.register("skateboard", () -> new SkateboardItem(new Item.Properties().stacksTo(1)));
 
     public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MODID);
+
+    public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(Registries.ENTITY_TYPE, MODID);
+
+    /**
+     * The loose physics board a bail leaves behind (story f). See {@link LooseSkateboardEntity}.
+     * {@code clientTrackingRange}/{@code updateInterval} match dynamic-vehicles' own Sable-driven
+     * vehicle entities, the only other entity in this codebase family driven by Sable each tick.
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<LooseSkateboardEntity>> LOOSE_SKATEBOARD = ENTITIES.register(
+            "loose_skateboard",
+            () -> EntityType.Builder.<LooseSkateboardEntity>of(LooseSkateboardEntity::new, MobCategory.MISC)
+                    .sized(SkateConstants.BAIL_BOARD_ENTITY_WIDTH, SkateConstants.BAIL_BOARD_ENTITY_HEIGHT)
+                    .clientTrackingRange(10).updateInterval(1)
+                    .build(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(MODID, "loose_skateboard").toString()));
 
     private static BlockBehaviour.Properties cobbleProperties() {
         return BlockBehaviour.Properties.of()
@@ -106,6 +127,7 @@ public class DynamicSkateboardsMod {
     public DynamicSkateboardsMod(IEventBus modEventBus, ModContainer modContainer) {
         ITEMS.register(modEventBus);
         BLOCKS.register(modEventBus);
+        ENTITIES.register(modEventBus);
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::addCreative);
         modEventBus.addListener(this::registerPayloads);
@@ -177,6 +199,14 @@ public class DynamicSkateboardsMod {
         /** Last tick's attack-held value, so {@code attackJustPressed} can be derived as an edge. */
         private static final Map<UUID, Boolean> PREVIOUS_ATTACK_HELD = new ConcurrentHashMap<>();
 
+        /**
+         * Last tick's vertical velocity, so a bail (story f) can see the player's actual fall
+         * speed the instant BEFORE touchdown resolves it &mdash; by the time
+         * {@code player.getDeltaMovement()} is read this tick, vanilla's own collision step has
+         * typically already zeroed it out if this is the tick the player lands.
+         */
+        private static final Map<UUID, Double> PREVIOUS_VERTICAL_VELOCITY = new ConcurrentHashMap<>();
+
         public static void setJumpHeld(UUID player, boolean jumping) {
             JUMP_HELD.put(player, jumping);
         }
@@ -207,11 +237,13 @@ public class DynamicSkateboardsMod {
             PREVIOUS_ATTACK_HELD.put(player.getUUID(), attackHeld);
             TrickDirection direction = TrickDirection.fromKeys(
                     trickInput.forwardHeld(), trickInput.backHeld(), trickInput.leftHeld(), trickInput.rightHeld());
+            double previousVerticalVelocity = PREVIOUS_VERTICAL_VELOCITY.getOrDefault(player.getUUID(), 0.0);
+            PREVIOUS_VERTICAL_VELOCITY.put(player.getUUID(), delta.y);
 
             SkateState previousState = controller.state();
             SkateState newState = controller.update(new SkateInput(
                     mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
-                    trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction));
+                    trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction, previousVerticalVelocity));
 
             // Review fix: a grind active the tick riding goes GROUNDED outright (board
             // unequipped mid-grind, etc.) must be dropped here - tick() below only ever runs
@@ -220,7 +252,13 @@ public class DynamicSkateboardsMod {
             // airborne.
             grindSeam.clearIfNotRiding(newState != SkateState.GROUNDED);
 
-            if (newState != SkateState.GROUNDED) {
+            // Story (f): a badly missed landing just forced a bail. This is the ONLY place in the
+            // mod the board leaves the player's inventory - see SkateController#bail for why the
+            // decision lives there (the pure, unit-tested state machine) while the Minecraft-side
+            // effects (remove the item, spawn the physics entity) live here.
+            if (controller.takeBailedThisTick()) {
+                performBail(player);
+            } else if (newState != SkateState.GROUNDED) {
                 if (grindSeam.isGrinding()) {
                     // Overrides position/velocity directly along the acquired edge; never also
                     // run the normal riding velocity model for the same tick (they'd fight).
@@ -261,6 +299,25 @@ public class DynamicSkateboardsMod {
         }
 
         /**
+         * Story (f): removes the equipped skateboard and spawns the loose physics board carrying
+         * the player's own velocity as crash momentum. The ONLY place in the mod a board leaves
+         * the player's inventory outside a deliberate inventory action &mdash; see
+         * {@link SkateController#bail} for the decision and {@link LooseSkateboardEntity} for the
+         * physics/pickup lifecycle this starts.
+         */
+        private static void performBail(ServerPlayer player) {
+            ItemStack board = player.getItemInHand(InteractionHand.MAIN_HAND);
+            if (!board.is(SKATEBOARD)) {
+                // Defensive only: a bail can only fire the tick mainHandIsSkateboard was true.
+                return;
+            }
+            player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+            if (player.level() instanceof ServerLevel serverLevel) {
+                LooseSkateboardEntity.spawnFromBail(serverLevel, player);
+            }
+        }
+
+        /**
          * Unconditional per {@link SkateSyncPolicy}: a stale-skating hole would otherwise remain
          * for an observer who stops tracking while the target skates, outlives that unseen, then
          * starts tracking again &mdash; they'd never learn the target went back to GROUNDED.
@@ -296,6 +353,7 @@ public class DynamicSkateboardsMod {
             JUMP_HELD.remove(entity.getUUID());
             TRICK_INPUT.remove(entity.getUUID());
             PREVIOUS_ATTACK_HELD.remove(entity.getUUID());
+            PREVIOUS_VERTICAL_VELOCITY.remove(entity.getUUID());
             GRIND_SEAMS.remove(entity.getUUID());
             SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
             if (broadcast != null) {
@@ -410,6 +468,11 @@ public class DynamicSkateboardsMod {
             if (SneakSuppressionPolicy.suppressVanillaSneak(state)) {
                 event.getInput().shiftKeyDown = false;
             }
+        }
+
+        @SubscribeEvent
+        public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+            event.registerEntityRenderer(LOOSE_SKATEBOARD.get(), LooseSkateboardRenderer::new);
         }
     }
 }

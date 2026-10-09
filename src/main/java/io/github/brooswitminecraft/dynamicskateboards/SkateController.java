@@ -28,6 +28,9 @@ package io.github.brooswitminecraft.dynamicskateboards;
  *       {@code flipPressBuffer} so a press slightly before takeoff still counts), landing completes
  *       it ({@link #takeCompletedFlip()}); right click held selects/sustains a {@link GrabTrick},
  *       cleared on release or on leaving AIRBORNE.
+ *   <li>AIRBORNE &rarr; GROUNDED directly (bypassing LANDING) on touchdown if the incoming
+ *       vertical speed is a badly missed landing (story (f): see
+ *       {@link SkateConstants#BAIL_IMPACT_SPEED_THRESHOLD}) &mdash; see {@link #takeBailedThisTick()}.
  * </ul>
  */
 public final class SkateController {
@@ -40,6 +43,7 @@ public final class SkateController {
     private FlipTrick activeFlip;
     private FlipTrick completedFlip;
     private GrabTrick activeGrab;
+    private boolean bailedThisTick;
 
     private final InputBuffer<Boolean> earlyJumpBuffer = new InputBuffer<>(SkateConstants.INPUT_BUFFER_WINDOW_TICKS);
     private final InputBuffer<TrickDirection> flipPressBuffer = new InputBuffer<>(SkateConstants.INPUT_BUFFER_WINDOW_TICKS);
@@ -58,17 +62,12 @@ public final class SkateController {
     public SkateState update(SkateInput input) {
         pendingOllieImpulse = null;
         completedFlip = null;
+        bailedThisTick = false;
         earlyJumpBuffer.tick();
         flipPressBuffer.tick();
 
         if (!input.mainHandIsSkateboard()) {
-            state = SkateState.GROUNDED;
-            chargeTicks = 0;
-            landingTicks = 0;
-            speed = 0.0;
-            headingDegrees = input.facingHeadingDegrees();
-            activeFlip = null;
-            activeGrab = null;
+            exitToGrounded(input);
             return state;
         }
 
@@ -135,6 +134,14 @@ public final class SkateController {
                 }
                 if (input.onGround()) {
                     activeGrab = null;
+                    // Story (f): a badly missed landing - too much downward speed still carried
+                    // into touchdown, whether from a long fall, an overcharged ollie coming down
+                    // wrong, or a grind run off the end of a rail with nothing to land on - bails
+                    // instead of resolving into LANDING. See SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD.
+                    if (Math.abs(input.verticalVelocity()) >= SkateConstants.BAIL_IMPACT_SPEED_THRESHOLD) {
+                        bail(input);
+                        return state;
+                    }
                     state = SkateState.LANDING;
                     landingTicks = 0;
                 }
@@ -170,6 +177,34 @@ public final class SkateController {
         state = SkateState.AIRBORNE;
         pendingOllieImpulse = SkateMovement.ollieImpulse(chargeTicks);
         chargeTicks = 0;
+    }
+
+    /**
+     * Shared reset used by every existing exit-skating path: unequipping the board
+     * ({@code !mainHandIsSkateboard}) and now {@link #bail} both land here, so a bail exits
+     * skating via the exact same route the spec requires rather than inventing a second one.
+     */
+    private void exitToGrounded(SkateInput input) {
+        state = SkateState.GROUNDED;
+        chargeTicks = 0;
+        landingTicks = 0;
+        speed = 0.0;
+        headingDegrees = input.facingHeadingDegrees();
+        activeFlip = null;
+        activeGrab = null;
+    }
+
+    /**
+     * Story (f)'s rare, config-driven crash exit: the trick in progress (if any) did not stick
+     * either, so it is dropped rather than reported completed, then skating ends via the exact
+     * same {@link #exitToGrounded} every other exit path uses. {@link #takeBailedThisTick()} is
+     * the caller's signal to run the loose-board sequence (remove the equipped item, spawn the
+     * physics entity) exactly once for this tick.
+     */
+    private void bail(SkateInput input) {
+        bailedThisTick = true;
+        activeFlip = null;
+        exitToGrounded(input);
     }
 
     private void updateMotion(SkateInput input) {
@@ -215,13 +250,28 @@ public final class SkateController {
 
     /**
      * Returns and clears the flip that just landed this tick (completed its {@code LANDING}
-     * tolerance), or {@code null} if none landed this tick. Minimal feedback only: there is no
-     * "failed" case here, since this story implements no bail mechanic (story (f)'s concern) -
-     * every flip that is still active when LANDING completes counts as landed.
+     * tolerance), or {@code null} if none landed this tick. Minimal feedback only: a flip whose
+     * landing turns out to be a bail (story (f): {@link #bail}) is dropped there, before
+     * {@code LANDING} is ever entered, so it never reaches here as "completed" - every flip still
+     * active when LANDING successfully completes counts as landed.
      */
     public FlipTrick takeCompletedFlip() {
         FlipTrick value = completedFlip;
         completedFlip = null;
+        return value;
+    }
+
+    /**
+     * Returns and clears whether this tick's {@link #update} just forced a bail rather than a
+     * normal landing. The caller (server-side glue) checks this once per tick, after
+     * {@code update}, to run the loose-board sequence exactly once: removing the equipped board
+     * and spawning the physics entity. {@code state()} is already {@code GROUNDED} by the time
+     * this returns {@code true} - the same state a normal "board left the main hand" exit
+     * produces - since {@link #bail} exits through the shared {@link #exitToGrounded}.
+     */
+    public boolean takeBailedThisTick() {
+        boolean value = bailedThisTick;
+        bailedThisTick = false;
         return value;
     }
 
