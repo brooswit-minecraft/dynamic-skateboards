@@ -9,8 +9,10 @@ import org.slf4j.Logger;
 
 import com.mojang.logging.LogUtils;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
@@ -18,14 +20,17 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderPlayerEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
@@ -36,9 +41,10 @@ import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * Entry point for story (a): the skateboard item and the hold-to-skate state (MINECRAFT-94 /
- * MINECRAFT-99). Skating is driven ONLY by the server, once per tick, from each
- * {@link net.minecraft.server.level.ServerPlayer}'s main-hand item — see
+ * Entry point for the skateboard item and the arcade riding controller (MINECRAFT-94/95/99).
+ * Riding is driven ONLY by the server, once per tick, from each
+ * {@link net.minecraft.server.level.ServerPlayer}'s main-hand item plus the authoritative mirror
+ * of their Jump key (see {@link SkateJumpInputPayload}) &mdash; see
  * {@link ServerEvents#serverPlayerTick} for why the server (not the client) owns this state.
  */
 @Mod(DynamicSkateboardsMod.MODID)
@@ -94,13 +100,6 @@ public class DynamicSkateboardsMod {
         registerBlockItem("curved_wall", CURVED_WALL);
     }
 
-    /**
-     * One {@link SkateController} per online player, server-side only. A player who logs out
-     * mid-skate drops their controller here and simply starts GROUNDED on rejoin; there is no
-     * state worth persisting across a disconnect.
-     */
-    private static final Map<UUID, SkateController> CONTROLLERS = new ConcurrentHashMap<>();
-
     public DynamicSkateboardsMod(IEventBus modEventBus, ModContainer modContainer) {
         ITEMS.register(modEventBus);
         BLOCKS.register(modEventBus);
@@ -114,7 +113,9 @@ public class DynamicSkateboardsMod {
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
-        event.registrar("1").playToClient(SkatingStatePayload.TYPE, SkatingStatePayload.STREAM_CODEC, SkatingStatePayload::handle);
+        var registrar = event.registrar("1");
+        registrar.playToClient(SkatingStatePayload.TYPE, SkatingStatePayload.STREAM_CODEC, SkatingStatePayload::handle);
+        registrar.playToServer(SkateJumpInputPayload.TYPE, SkateJumpInputPayload.STREAM_CODEC, SkateJumpInputPayload::handle);
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
@@ -127,50 +128,147 @@ public class DynamicSkateboardsMod {
     }
 
     /**
-     * Why the SERVER owns skating state, not the client: skating affects the player's rendered
-     * stance (and, for story (b), gates movement/jump behavior) which every other player in the
-     * world must agree on. A client-decided "I'm skating" would be exactly the kind of
-     * client-side illusion the ticket rules out — a modified client could claim to skate (or not)
-     * regardless of what it's holding, and other players would never see the truth. Instead the
-     * server alone evaluates the held item each tick via {@link SkateController} (a pure,
-     * unit-tested class — see {@code SkateControllerTest}) and pushes the authoritative result to
-     * every tracking client with {@link SkatingStatePayload}; the client only ever mirrors it
-     * (see {@link SkateClientState}) and never recomputes it.
+     * Why the SERVER owns riding state, not the client: it affects the player's rendered stance
+     * and, now, actual movement (speed/steering/ollie/landing), which every other player in the
+     * world must agree on. A client-decided result would be exactly the kind of client-side
+     * illusion the ticket rules out. Instead the server alone evaluates
+     * {@link SkateController} (a pure, unit-tested class) from the held item and the
+     * continuously-synced {@link SkateJumpInputPayload}, applies the resulting velocity, and
+     * pushes the animation state to every tracking client with {@link SkatingStatePayload}; the
+     * client only ever mirrors it (see {@link SkateClientState}) and never recomputes it.
      */
     @EventBusSubscriber(modid = MODID)
     public static final class ServerEvents {
         private ServerEvents() {}
+
+        /**
+         * One {@link SkateController} per online player, server-side only, plus the sync-gap
+         * decisions over it &mdash; see {@link SkateSyncPolicy}.
+         */
+        private static final SkateSyncPolicy SYNC_POLICY = new SkateSyncPolicy();
+
+        /**
+         * The server's authoritative mirror of each online player's Jump key, kept live only by
+         * {@link SkateJumpInputPayload} &mdash; see that class's javadoc for why a normal
+         * (non-vehicle) {@code ServerPlayer} has no other continuously-live source for it.
+         */
+        private static final Map<UUID, Boolean> JUMP_HELD = new ConcurrentHashMap<>();
+
+        public static void setJumpHeld(UUID player, boolean jumping) {
+            JUMP_HELD.put(player, jumping);
+        }
 
         @SubscribeEvent
         public static void serverPlayerTick(PlayerTickEvent.Post event) {
             if (!(event.getEntity() instanceof ServerPlayer player)) {
                 return;
             }
-            SkateController controller = CONTROLLERS.computeIfAbsent(player.getUUID(), id -> new SkateController());
+            SkateController controller = SYNC_POLICY.controllerFor(player.getUUID());
+
             boolean mainHandIsSkateboard = player.getItemInHand(InteractionHand.MAIN_HAND).is(SKATEBOARD);
-            boolean wasSkating = controller.isSkating();
-            boolean isSkating = controller.update(mainHandIsSkateboard) != SkateState.GROUNDED;
-            if (isSkating != wasSkating) {
-                PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new SkatingStatePayload(player.getUUID(), isSkating));
+            boolean jumpHeld = JUMP_HELD.getOrDefault(player.getUUID(), Boolean.FALSE);
+            boolean onGround = player.onGround();
+            Vec3 delta = player.getDeltaMovement();
+            double observedHorizontalSpeed = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+            double facingHeadingDegrees = player.getYRot();
+
+            SkateState previousState = controller.state();
+            SkateState newState = controller.update(new SkateInput(
+                    mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees));
+
+            if (newState != SkateState.GROUNDED) {
+                applyRidingVelocity(player, controller, delta);
             }
+
+            if (newState != previousState) {
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(player, new SkatingStatePayload(player.getUUID(), newState));
+            }
+        }
+
+        private static void applyRidingVelocity(ServerPlayer player, SkateController controller, Vec3 currentDelta) {
+            double yawRadians = Math.toRadians(controller.headingDegrees());
+            double forwardX = -Math.sin(yawRadians);
+            double forwardZ = Math.cos(yawRadians);
+            double speed = controller.speed();
+
+            Double ollieImpulse = controller.takePendingOllieImpulse();
+            double verticalVelocity = ollieImpulse != null ? ollieImpulse : currentDelta.y;
+
+            player.setDeltaMovement(new Vec3(forwardX * speed, verticalVelocity, forwardZ * speed));
+            // Player movement is otherwise client-authoritative: ServerEntity only sends
+            // ClientboundSetEntityMotionPacket (to trackers AND the owning client's own
+            // connection) when hurtMarked is true, same as vanilla knockback. Without this,
+            // setDeltaMovement above would silently never reach any client.
+            player.hurtMarked = true;
+        }
+
+        /**
+         * Unconditional per {@link SkateSyncPolicy}: a stale-skating hole would otherwise remain
+         * for an observer who stops tracking while the target skates, outlives that unseen, then
+         * starts tracking again &mdash; they'd never learn the target went back to GROUNDED.
+         */
+        @SubscribeEvent
+        public static void onStartTracking(PlayerEvent.StartTracking event) {
+            if (!(event.getTarget() instanceof ServerPlayer target) || !(event.getEntity() instanceof ServerPlayer tracker)) {
+                return;
+            }
+            SkateState state = SYNC_POLICY.stateToSendOnStartTracking(target.getUUID());
+            PacketDistributor.sendToPlayer(tracker, new SkatingStatePayload(target.getUUID(), state));
         }
 
         @SubscribeEvent
         public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-            CONTROLLERS.remove(event.getEntity().getUUID());
+            Entity entity = event.getEntity();
+            JUMP_HELD.remove(entity.getUUID());
+            SkateState broadcast = SYNC_POLICY.onLogout(entity.getUUID());
+            if (broadcast != null) {
+                PacketDistributor.sendToPlayersTrackingEntityAndSelf(entity, new SkatingStatePayload(entity.getUUID(), broadcast));
+            }
         }
     }
 
-    /** Applies the custom skate stance at render time; never touches sneak/crouch state. */
+    /** Applies the custom skate animation pose at render time; never touches sneak/crouch state. */
     @EventBusSubscriber(modid = MODID, value = Dist.CLIENT)
     public static final class ClientEvents {
         private ClientEvents() {}
 
         @SubscribeEvent
         public static void onRenderPlayerPre(RenderPlayerEvent.Pre event) {
-            if (SkateClientState.isSkating(event.getEntity().getUUID())) {
-                event.getPoseStack().translate(0.0, -SkateConstants.SKATE_STANCE_HEIGHT_OFFSET, 0.0);
+            SkateState state = SkateClientState.state(event.getEntity().getUUID());
+            float offset = switch (state) {
+                case GROUNDED -> 0.0f;
+                case SKATING -> SkateConstants.SKATE_STANCE_HEIGHT_OFFSET;
+                case CHARGING -> SkateConstants.SKATE_STANCE_HEIGHT_OFFSET + SkateConstants.CHARGE_STANCE_EXTRA_HEIGHT_OFFSET;
+                case AIRBORNE -> SkateConstants.AIRBORNE_HEIGHT_OFFSET;
+                case LANDING -> SkateConstants.LANDING_HEIGHT_OFFSET;
+            };
+            if (offset != 0.0f) {
+                event.getPoseStack().translate(0.0, -offset, 0.0);
             }
+        }
+
+        /**
+         * Forwards the vanilla Jump key's held state to the server every client tick &mdash; see
+         * {@link SkateJumpInputPayload} for why a normal player needs this at all, and why
+         * sending it continuously (not on a request) is what keeps charge/release responsive.
+         */
+        @SubscribeEvent
+        public static void onClientTick(ClientTickEvent.Post event) {
+            Minecraft client = Minecraft.getInstance();
+            if (client.player == null || client.getConnection() == null) {
+                return;
+            }
+            PacketDistributor.sendToServer(new SkateJumpInputPayload(client.options.keyJump.isDown()));
+        }
+
+        /**
+         * Clears the client-side mirror on disconnect so a UUID that happens to reappear on a
+         * different server (or a fresh join) never starts out rendering a stance left over from
+         * a previous connection.
+         */
+        @SubscribeEvent
+        public static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+            SkateClientState.clearAll();
         }
     }
 }
