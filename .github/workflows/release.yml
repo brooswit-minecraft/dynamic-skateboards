@@ -1,0 +1,93 @@
+name: Release
+
+# First create the Modrinth draft project and set MODRINTH_PROJECT_ID, then
+# dispatch this workflow. Later source/changelog pushes release automatically.
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'changelog.d/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dynamic-skateboards-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute version
+        id: version
+        run: |
+          last_tag=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
+          if [ -n "$last_tag" ]; then
+            last="${last_tag#v}"
+            fragments=$(git diff --name-only --diff-filter=A "$last_tag" HEAD -- changelog.d | grep -v '/README.md$' | grep '\.md$' || true)
+          else
+            last="0.0.0"
+            fragments=$(git ls-files changelog.d | grep -v '/README.md$' | grep '\.md$' || true)
+          fi
+          if [ -n "$fragments" ]; then
+            python3 scripts/next_version.py "$last" $fragments > release-info.txt
+            echo "value=$(head -n1 release-info.txt)" >> "$GITHUB_OUTPUT"
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            tail -n +2 release-info.txt > release-notes.md
+          elif [ "${{ github.event_name }}" = workflow_dispatch ] && [ -n "$last_tag" ]; then
+            echo "value=$last" >> "$GITHUB_OUTPUT"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            gh release view "$last_tag" --json body --jq .body > release-notes.md
+          else
+            echo 'No releasable changelog fragments.'
+          fi
+      - uses: actions/setup-java@v5
+        if: steps.version.outputs.new == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Build and test
+        if: steps.version.outputs.new == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: ./gradlew build --no-daemon "-Pmod_version=$VERSION"
+      - name: Publish immutable GitHub release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: gh release create "v$VERSION" "build/libs/dynamicskateboards-$VERSION.jar" --target "$GITHUB_SHA" --title "Dynamic Skateboards $VERSION" --notes-file release-notes.md
+      - name: Fetch release artifact
+        if: steps.version.outputs.value
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: gh release download "v$VERSION" --pattern "dynamicskateboards-$VERSION.jar" --dir build/libs --clobber
+      - uses: oven-sh/setup-bun@v2
+        if: steps.version.outputs.value
+      - name: Check existing Modrinth version
+        id: modrinth
+        if: steps.version.outputs.value
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          test -n "$MODRINTH_TOKEN"
+          test -n "$PROJECT_ID"
+          python3 scripts/check_modrinth_version.py >> "$GITHUB_OUTPUT"
+      - name: Publish Modrinth version
+        if: steps.version.outputs.value && steps.modrinth.outputs.exists != 'true'
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          bunx --bun github:brooswit-minecraft/rinth#v0.10.0 publish "$PROJECT_ID" \
+            --file "build/libs/dynamicskateboards-$VERSION.jar" --version "$VERSION" \
+            --changelog-file release-notes.md --game-version 1.21.1 --loader neoforge --channel alpha

@@ -1,0 +1,33 @@
+name: Modrinth draft project create
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CREATE-DRAFT-PROJECT to make the live, one-shot draft project; otherwise dry-run.'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Create draft project (dry-run by default)
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          LIVE: ${{ inputs.confirm == 'CREATE-DRAFT-PROJECT' }}
+        run: |
+          args=(project create --slug dynamic-skateboards --title 'Dynamic Skateboards' --description "$(cat modrinth/short-description.txt)" --body-file modrinth/body.md --project-type mod --client-side required --server-side required --license MIT --category game-mechanics --category transportation --source-url "https://github.com/$GITHUB_REPOSITORY" --issues-url "https://github.com/$GITHUB_REPOSITORY/issues")
+          if [ "$LIVE" != true ]; then
+            bunx --bun github:brooswit-minecraft/rinth#v0.10.0 --json "${args[@]}" --dry-run
+            exit 0
+          fi
+          test -n "$MODRINTH_TOKEN"
+          bunx --bun github:brooswit-minecraft/rinth#v0.10.0 --json "${args[@]}" | tee project.json
+          jq -r '.id' project.json | xargs -r -I{} echo "Created project {}; set it as MODRINTH_PROJECT_ID before dispatching Release."
