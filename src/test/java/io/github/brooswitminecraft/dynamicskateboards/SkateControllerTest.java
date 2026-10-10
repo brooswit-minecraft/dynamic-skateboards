@@ -273,6 +273,8 @@ class SkateControllerTest {
 
         // The camera now faces south (180), but the airborne acquisition must retain the board's
         // travel heading rather than using that camera yaw for edge selection/travel direction.
+        c.update(new SkateInput(true, false, false, 0.0, 180.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false)); // transition to AIRBORNE
         c.update(new SkateInput(true, false, false, 0.0, 180.0, true, false, false,
                 TrickDirection.NEUTRAL, 0.0, false, false, false, false));
 
