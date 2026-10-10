@@ -11,22 +11,35 @@ class SkateMovementTest {
         double speed = 0.4;
         for (int tick = 0; tick < 10; tick++) {
             double expected = speed * SkateConstants.FRICTION;
-            speed = SkateMovement.nextGroundSpeed(speed, 0.0); // nothing pushing it higher
+            speed = SkateMovement.nextGroundSpeed(speed, false, false); // nothing pushing it higher
             assertEquals(expected, speed, 1e-9, "decay must be governed exactly by FRICTION, tick " + tick);
         }
     }
 
     @Test
-    void groundSpeedAcceleratesTowardObservedSpeedWhenPushedHigher() {
+    void forwardKickAddsTheTunedSpeedGain() {
         double speed = 0.0;
-        double next = SkateMovement.nextGroundSpeed(speed, SkateConstants.TOP_SPEED);
-        assertEquals(SkateConstants.ACCELERATION, next, 1e-9);
+        double next = SkateMovement.nextGroundSpeed(speed, true, false);
+        assertEquals(SkateConstants.KICK_SPEED_GAIN, next, 1e-9);
+    }
+
+    @Test
+    void brakeStopsButNeverReverses() {
+        double speed = SkateMovement.nextGroundSpeed(0.01, false, true);
+        assertEquals(0.0, speed, 1e-9);
     }
 
     @Test
     void groundSpeedNeverExceedsTopSpeed() {
-        double speed = SkateMovement.nextGroundSpeed(SkateConstants.TOP_SPEED, 10.0);
+        double speed = SkateMovement.nextGroundSpeed(SkateConstants.TOP_SPEED, true, false);
         assertTrue(speed <= SkateConstants.TOP_SPEED);
+    }
+
+    @Test
+    void strafeSteeringTurnsHeadingWithoutCameraFacing() {
+        assertEquals(-10.0, SkateMovement.turnFromStrafe(0.0, true, false, 10.0), 1e-9);
+        assertEquals(10.0, SkateMovement.turnFromStrafe(0.0, false, true, 10.0), 1e-9);
+        assertEquals(0.0, SkateMovement.turnFromStrafe(0.0, true, true, 10.0), 1e-9);
     }
 
     @Test

@@ -23,8 +23,14 @@ public final class SkateConstants {
     /** Maximum horizontal ground speed, in blocks/tick. */
     public static final double TOP_SPEED = 0.5;
 
-    /** How much horizontal speed can increase per tick while actively pushed toward a higher speed. */
-    public static final double ACCELERATION = 0.035;
+    /** Speed gained by one forward-foot kick, in blocks/tick. */
+    public static final double KICK_SPEED_GAIN = 0.07;
+
+    /** Ticks between forward-foot kicks while forward remains held. */
+    public static final int KICK_CADENCE_TICKS = 6;
+
+    /** Speed removed per tick while the back foot is braking, in blocks/tick. */
+    public static final double BRAKE_DECELERATION = 0.06;
 
     /**
      * Fraction of horizontal ground speed retained per tick once nothing is pushing it higher
@@ -32,7 +38,7 @@ public final class SkateConstants {
      */
     public static final double FRICTION = 0.985;
 
-    /** Maximum heading change toward the player's facing direction per tick while grounded, in degrees. */
+    /** Maximum heading change from a held left/right steering input per tick while grounded, in degrees. */
     public static final double STEER_TURN_RATE_DEGREES = 10.0;
 
     // --- Air control ---

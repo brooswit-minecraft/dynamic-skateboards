@@ -30,6 +30,11 @@ package io.github.brooswitminecraft.dynamicskateboards;
  *     resolution has typically already zeroed out by the time the caller can read it). Used only
  *     to detect a badly missed landing (see {@link SkateConstants#BAIL_IMPACT_SPEED_THRESHOLD});
  *     the convenience constructor below defaults it to 0.0 for every caller that doesn't care.
+ * @param forwardHeld raw forward-foot kick input. This remains separate from {@code direction}
+ *     because a diagonal held for a trick must not discard its physical riding input.
+ * @param backHeld raw back-foot brake input; it can reduce speed to zero but never requests reverse.
+ * @param leftHeld raw left steering input.
+ * @param rightHeld raw right steering input.
  */
 public record SkateInput(
         boolean mainHandIsSkateboard,
@@ -41,7 +46,26 @@ public record SkateInput(
         boolean attackJustPressed,
         boolean useHeld,
         TrickDirection direction,
-        double verticalVelocity) {
+        double verticalVelocity,
+        boolean forwardHeld,
+        boolean backHeld,
+        boolean leftHeld,
+        boolean rightHeld) {
+
+    /**
+     * Compatibility constructor for pure callers that only model trick direction. It derives the
+     * corresponding one-axis riding input; production always uses the raw-key constructor above.
+     */
+    public SkateInput(
+            boolean mainHandIsSkateboard, boolean jumpHeld, boolean onGround,
+            double observedHorizontalSpeed, double facingHeadingDegrees, boolean shiftHeld,
+            boolean attackJustPressed, boolean useHeld, TrickDirection direction,
+            double verticalVelocity) {
+        this(mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
+                shiftHeld, attackJustPressed, useHeld, direction, verticalVelocity,
+                direction == TrickDirection.FORWARD, direction == TrickDirection.BACK,
+                direction == TrickDirection.LEFT, direction == TrickDirection.RIGHT);
+    }
 
     /** Convenience for callers that only care about riding (no trick/manual input this tick). */
     public SkateInput(
@@ -51,6 +75,7 @@ public record SkateInput(
             double observedHorizontalSpeed,
             double facingHeadingDegrees) {
         this(mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
-                false, false, false, TrickDirection.NEUTRAL, 0.0);
+                false, false, false, TrickDirection.NEUTRAL, 0.0,
+                false, false, false, false);
     }
 }

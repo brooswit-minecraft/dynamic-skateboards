@@ -243,7 +243,8 @@ public class DynamicSkateboardsMod {
             SkateState previousState = controller.state();
             SkateState newState = controller.update(new SkateInput(
                     mainHandIsSkateboard, jumpHeld, onGround, observedHorizontalSpeed, facingHeadingDegrees,
-                    trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction, previousVerticalVelocity));
+                    trickInput.shiftHeld(), attackJustPressed, trickInput.useHeld(), direction, previousVerticalVelocity,
+                    trickInput.forwardHeld(), trickInput.backHeld(), trickInput.leftHeld(), trickInput.rightHeld()));
 
             // Review fix: a grind active the tick riding goes GROUNDED outright (board
             // unequipped mid-grind, etc.) must be dropped here - tick() below only ever runs

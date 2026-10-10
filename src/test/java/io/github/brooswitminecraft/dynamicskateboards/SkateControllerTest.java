@@ -18,6 +18,11 @@ class SkateControllerTest {
         return new SkateInput(true, false, onGround, 0.0, 0.0, shift, attackJustPressed, useHeld, direction, 0.0);
     }
 
+    private static SkateInput riding(boolean forward, boolean back, boolean left, boolean right) {
+        return new SkateInput(true, false, true, 0.0, 0.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, forward, back, left, right);
+    }
+
     /** A touchdown ({@code onGround}) carrying {@code verticalVelocity} blocks/tick of incoming fall speed. */
     private static SkateInput landing(double verticalVelocity) {
         return new SkateInput(true, false, true, 0.0, 0.0, false, false, false, TrickDirection.NEUTRAL, verticalVelocity);
@@ -25,11 +30,20 @@ class SkateControllerTest {
 
     private static final class RecordingGrindSeam implements GrindSeam {
         private boolean called;
+        private final boolean accepts;
+
+        private RecordingGrindSeam() {
+            this(false);
+        }
+
+        private RecordingGrindSeam(boolean accepts) {
+            this.accepts = accepts;
+        }
 
         @Override
         public boolean tryGrind(SkateInput input) {
             called = true;
-            return false;
+            return accepts;
         }
     }
 
@@ -176,6 +190,40 @@ class SkateControllerTest {
         c.update(held(true, false, true)); // SKATING
         SkateState state = c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
         assertEquals(SkateState.MANUAL, state);
+    }
+
+    @Test
+    void groundedShiftAcquiresEdgeBeforeManual() {
+        RecordingGrindSeam seam = new RecordingGrindSeam(true);
+        SkateController c = new SkateController(seam);
+        c.update(held(true, false, true));
+
+        assertEquals(SkateState.SKATING, c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
+        assertTrue(seam.called, "grounded Shift must offer the nearby edge to the grind seam");
+    }
+
+    @Test
+    void heldForwardKicksOnACadenceAndBackBrakesToStop() {
+        SkateController c = new SkateController();
+        c.update(riding(false, false, false, false));
+        c.update(riding(true, false, false, false));
+        assertEquals(SkateConstants.KICK_SPEED_GAIN, c.speed(), 1e-9, "first forward press kicks immediately");
+        for (int tick = 0; tick <= SkateConstants.KICK_CADENCE_TICKS; tick++) {
+            c.update(riding(true, false, false, false));
+        }
+        assertEquals(SkateConstants.KICK_SPEED_GAIN * 2, c.speed(), 1e-9, "held forward gets one periodic second kick");
+        for (int tick = 0; tick < 10; tick++) {
+            c.update(riding(false, true, false, false));
+        }
+        assertEquals(0.0, c.speed(), 1e-9, "back is a brake, never reverse propulsion");
+    }
+
+    @Test
+    void strafeTurnsHeadingWithoutSidewaysMotionModel() {
+        SkateController c = new SkateController();
+        c.update(riding(false, false, false, false));
+        c.update(riding(false, false, true, false));
+        assertEquals(-SkateConstants.STEER_TURN_RATE_DEGREES, c.headingDegrees(), 1e-9);
     }
 
     @Test
