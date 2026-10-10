@@ -211,7 +211,10 @@ class SkateControllerTest {
         for (int tick = 0; tick <= SkateConstants.KICK_CADENCE_TICKS; tick++) {
             c.update(riding(true, false, false, false));
         }
-        assertEquals(SkateConstants.KICK_SPEED_GAIN * 2, c.speed(), 1e-9, "held forward gets one periodic second kick");
+        double expectedAfterSecondKick = SkateConstants.KICK_SPEED_GAIN
+                * (1.0 + Math.pow(SkateConstants.FRICTION, SkateConstants.KICK_CADENCE_TICKS));
+        assertEquals(expectedAfterSecondKick, c.speed(), 1e-9,
+                "the second periodic kick follows the expected coast interval");
         for (int tick = 0; tick < 10; tick++) {
             c.update(riding(false, true, false, false));
         }
@@ -257,12 +260,13 @@ class SkateControllerTest {
     }
 
     @Test
-    void shiftWhileAirborneNeverCallsSeamWhileRiding() {
+    void groundedShiftOffersTheGrindSeamBeforeManualFallback() {
         RecordingGrindSeam seam = new RecordingGrindSeam();
         SkateController c = new SkateController(seam);
         c.update(held(true, false, true)); // SKATING
-        c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)); // MANUAL via Shift
-        assertFalse(seam.called, "Shift while riding must go to MANUAL, not the grind seam");
+        SkateState state = c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
+        assertTrue(seam.called, "grounded Shift must offer the edge to the grind seam");
+        assertEquals(SkateState.MANUAL, state, "a declined edge acquisition falls back to MANUAL");
     }
 
     // --- FLIP family: left click + direction ---
