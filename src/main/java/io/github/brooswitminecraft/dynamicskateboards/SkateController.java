@@ -88,7 +88,7 @@ public final class SkateController {
                 if (input.onGround() && input.shiftHeld()) {
                     // A nearby edge wins over manual: the same held Shift both acquires a
                     // grounded grind and keeps the existing manual fallback away from an edge.
-                    state = grindSeam.tryGrind(input) ? SkateState.SKATING : SkateState.MANUAL;
+                    state = grindSeam.tryGrind(input, headingDegrees) ? SkateState.SKATING : SkateState.MANUAL;
                 } else if (input.onGround() && input.jumpHeld()) {
                     state = SkateState.CHARGING;
                     chargeTicks = 0;
@@ -101,7 +101,7 @@ public final class SkateController {
                     state = SkateState.AIRBORNE;
                 } else if (!input.shiftHeld()) {
                     state = SkateState.SKATING;
-                } else if (grindSeam.tryGrind(input)) {
+                } else if (grindSeam.tryGrind(input, headingDegrees)) {
                     // The player can roll into snap range while already holding Shift; keep
                     // offering grounded acquisition rather than requiring a release/repress.
                     state = SkateState.SKATING;
@@ -127,7 +127,7 @@ public final class SkateController {
                     // The seam: airborne/approaching Shift routes to story (e)'s grind path, never
                     // to MANUAL. GrindSeam.NONE declines every time; the route itself is what this
                     // story ships and asserts.
-                    grindSeam.tryGrind(input);
+                    grindSeam.tryGrind(input, headingDegrees);
                 }
                 if (activeFlip == null) {
                     TrickDirection pendingFlip = flipPressBuffer.consume();

@@ -30,6 +30,7 @@ class SkateControllerTest {
 
     private static final class RecordingGrindSeam implements GrindSeam {
         private boolean called;
+        private double boardHeadingDegrees;
         private final boolean accepts;
 
         private RecordingGrindSeam() {
@@ -41,8 +42,9 @@ class SkateControllerTest {
         }
 
         @Override
-        public boolean tryGrind(SkateInput input) {
+        public boolean tryGrind(SkateInput input, double boardHeadingDegrees) {
             called = true;
+            this.boardHeadingDegrees = boardHeadingDegrees;
             return accepts;
         }
     }
@@ -257,6 +259,25 @@ class SkateControllerTest {
         assertTrue(seam.called, "Shift while AIRBORNE must route to the grind seam");
         assertEquals(SkateState.AIRBORNE, state, "the no-op seam must not itself change state");
         assertFalse(state == SkateState.MANUAL, "airborne Shift must never become MANUAL");
+    }
+
+    @Test
+    void grindAcquisitionUsesBoardHeadingWhenCameraHasTurnedAway() {
+        RecordingGrindSeam seam = new RecordingGrindSeam();
+        SkateController c = new SkateController(seam);
+        // Mount facing east, then steer the board left one grounded tick to heading 80.
+        c.update(new SkateInput(true, false, true, 0.0, 90.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false));
+        c.update(new SkateInput(true, false, true, 0.0, 90.0, false, false, false,
+                TrickDirection.LEFT, 0.0, false, false, true, false));
+
+        // The camera now faces south (180), but the airborne acquisition must retain the board's
+        // travel heading rather than using that camera yaw for edge selection/travel direction.
+        c.update(new SkateInput(true, false, false, 0.0, 180.0, true, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false));
+
+        assertTrue(seam.called);
+        assertEquals(80.0, seam.boardHeadingDegrees, 1e-9);
     }
 
     @Test

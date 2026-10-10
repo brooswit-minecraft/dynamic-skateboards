@@ -16,7 +16,7 @@ import net.minecraft.world.phys.Vec3;
  * exists.
  *
  * <p>{@link #tryGrind} is the {@link GrindSeam} contract method: {@code SkateController} calls it
- * once per tick while AIRBORNE and Shift is held, and it only ever ACQUIRES &mdash; see that
+ * while Shift seeks an airborne or grounded edge, and it only ever ACQUIRES &mdash; see that
  * interface's javadoc. Because {@code SkateController} gates that call on Shift being held, it
  * never fires the tick Shift is released, so release-on-Shift-release can't live there: the
  * actual per-tick following and every release path is driven directly by {@code ServerEvents}
@@ -52,7 +52,7 @@ public final class WorldGrindSeam implements GrindSeam {
     }
 
     @Override
-    public boolean tryGrind(SkateInput input) {
+    public boolean tryGrind(SkateInput input, double boardHeadingDegrees) {
         if (session.isActive()) {
             // Already grinding; this tick's actual following/release is ServerEvents' job via
             // tick(), not this acquisition-only contract method. Keep reporting "engaged."
@@ -69,13 +69,13 @@ public final class WorldGrindSeam implements GrindSeam {
                 GrindEdgeDetector.findCandidatePaths(source, center, SkateConstants.GRIND_SCAN_RADIUS_BLOCKS);
 
         Vec3 playerPos = preparedPlayer.position();
-        GrindPath chosen = GrindAcquisition.selectBestCandidate(candidates, playerPos, input.facingHeadingDegrees());
+        GrindPath chosen = GrindAcquisition.selectBestCandidate(candidates, playerPos, boardHeadingDegrees);
         if (chosen == null) {
             return false;
         }
 
         double distanceAlong = chosen.nearestDistanceAlong(playerPos);
-        int travelSign = GrindAcquisition.travelSignAt(chosen, distanceAlong, input.facingHeadingDegrees());
+        int travelSign = GrindAcquisition.travelSignAt(chosen, distanceAlong, boardHeadingDegrees);
         session.start(new GrindFollower(chosen, distanceAlong, travelSign));
         preparedPlayer.displayClientMessage(Component.literal("Grinding"), true);
         return true;
