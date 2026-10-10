@@ -198,7 +198,7 @@ class SkateControllerTest {
         SkateController c = new SkateController(seam);
         c.update(held(true, false, true));
 
-        assertEquals(SkateState.SKATING, c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
+        assertEquals(SkateState.SKATING, c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)));
         assertTrue(seam.called, "grounded Shift must offer the nearby edge to the grind seam");
     }
 
