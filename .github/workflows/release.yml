@@ -24,6 +24,10 @@ jobs:
           fetch-depth: 0
       - name: Compute version
         id: version
+        # A manual retry with no new fragments reads the notes from the
+        # existing immutable release; gh otherwise exits 4 on a clean runner.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           last_tag=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1)
           if [ -n "$last_tag" ]; then
