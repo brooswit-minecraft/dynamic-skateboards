@@ -87,8 +87,12 @@ class SlopeShapesTest {
      */
     @Test
     void shallowAndSteepPairsAreDesignedToTileExactly() {
+        assertEquals(0, SlopeKind.SHALLOW_SLOPE.entryHeight());
+        assertEquals(8, SlopeKind.SHALLOW_SLOPE.exitHeight());
         assertEquals(SlopeKind.SHALLOW_SLOPE.exitHeight(), SlopeKind.RAISED_SHALLOW_SLOPE.entryHeight());
-        assertEquals(SlopeKind.STEEP_SLOPE.exitHeight(), SlopeKind.RAISED_STEEP_SLOPE.entryHeight());
+        assertEquals(16, SlopeKind.RAISED_SHALLOW_SLOPE.exitHeight());
+        assertEquals(0, SlopeKind.STEEP_SLOPE.entryHeight());
+        assertEquals(16, SlopeKind.STEEP_SLOPE.exitHeight());
     }
 
     /**
@@ -102,9 +106,7 @@ class SlopeShapesTest {
     void slopeChainingTilesExactlyAcrossAllFacings() {
         SlopeKind[][] pairs = {
                 {SlopeKind.SHALLOW_SLOPE, SlopeKind.RAISED_SHALLOW_SLOPE},
-                {SlopeKind.STEEP_SLOPE, SlopeKind.RAISED_STEEP_SLOPE},
                 {SlopeKind.SHALLOW_SLOPE_INVERTED, SlopeKind.RAISED_SHALLOW_SLOPE_INVERTED},
-                {SlopeKind.STEEP_SLOPE_INVERTED, SlopeKind.RAISED_STEEP_SLOPE_INVERTED},
         };
         for (SlopeKind[] pair : pairs) {
             SlopeKind a = pair[0];
@@ -149,14 +151,24 @@ class SlopeShapesTest {
     }
 
     @Test
+    void steepSlopeHasOneVoxelStepsFromTheBlockBoundary() {
+        for (int column = 0; column < 16; column++) {
+            assertEquals(column + 1, SlopeShapes.stepHeight(column, 16),
+                    "a full-rise steep slope must have one voxel per column");
+        }
+        assertEquals(1, SlopeShapes.stepHeight(0, SlopeKind.STEEP_SLOPE.riseVoxels()),
+                "the first steep tread must begin at the block boundary");
+    }
+
+    @Test
     void angleOrderingIsShallowThenRegularThenSteep() {
-        assertTrue(SlopeKind.SHALLOW_SLOPE.angleDegrees() < SlopeKind.REGULAR_SLOPE.angleDegrees());
-        assertTrue(SlopeKind.REGULAR_SLOPE.angleDegrees() < SlopeKind.STEEP_SLOPE.angleDegrees());
+        assertTrue(SlopeKind.REGULAR_SLOPE.angleDegrees() < SlopeKind.SHALLOW_SLOPE.angleDegrees());
+        assertTrue(SlopeKind.SHALLOW_SLOPE.angleDegrees() < SlopeKind.STEEP_SLOPE.angleDegrees());
     }
 
     @Test
     void heightProfileIsMonotonicNonDecreasing() {
-        for (int rise : new int[] {4, 6, 8}) {
+        for (int rise : new int[] {6, 8, 16}) {
             int previous = 0;
             for (int col = 0; col < 16; col++) {
                 int height = SlopeShapes.stepHeight(col, rise);
@@ -168,10 +180,10 @@ class SlopeShapesTest {
     }
 
     @Test
-    void firstColumnIsAlwaysExactlyZero() {
-        // The other half of the exact-tiling guarantee: stepHeight uses floor (not round)
-        // specifically so this holds for every rise this family uses — see SlopeShapes.stepHeight.
-        for (int rise : new int[] {4, 6, 8}) {
+    void partialRiseFirstColumnIsExactlyZero() {
+        // The partial-rise profiles start at their declared vertical shift; the full steep
+        // profile intentionally begins at height one and is asserted above.
+        for (int rise : new int[] {6, 8}) {
             assertEquals(0, SlopeShapes.stepHeight(0, rise));
         }
     }

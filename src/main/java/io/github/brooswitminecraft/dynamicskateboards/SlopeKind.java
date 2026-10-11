@@ -5,20 +5,20 @@ package io.github.brooswitminecraft.dynamicskateboards;
  * regular, steep, raised steep) each with a normal and an inverted (ceiling-hugging) variant. See
  * {@link SlopeShapes} for what {@code riseVoxels}/{@code verticalShift}/{@code inverted} mean
  * geometrically, and docs/grindable-edges.md for the authored angles and the raised/non-raised
- * pairing invariant this enum encodes:
- * {@code SHALLOW.exitHeight() == RAISED_SHALLOW.entryHeight()} and
- * {@code STEEP.exitHeight() == RAISED_STEEP.entryHeight()}.
+ * pairing invariant this enum encodes: {@code SHALLOW.exitHeight() ==
+ * RAISED_SHALLOW.entryHeight()}. The regular and raised-steep IDs remain serialization-safe
+ * legacy pieces, while {@code STEEP} is the full 0→16 profile.
  */
 public enum SlopeKind {
-    SHALLOW_SLOPE("shallow_slope", 4, 0, false),
-    RAISED_SHALLOW_SLOPE("raised_shallow_slope", 4, 4, false),
+    SHALLOW_SLOPE("shallow_slope", 8, 0, false),
+    RAISED_SHALLOW_SLOPE("raised_shallow_slope", 8, 8, false),
     REGULAR_SLOPE("regular_slope", 6, 0, false),
-    STEEP_SLOPE("steep_slope", 8, 0, false),
+    STEEP_SLOPE("steep_slope", 16, 0, false),
     RAISED_STEEP_SLOPE("raised_steep_slope", 8, 8, false),
-    SHALLOW_SLOPE_INVERTED("shallow_slope_inverted", 4, 0, true),
-    RAISED_SHALLOW_SLOPE_INVERTED("raised_shallow_slope_inverted", 4, 4, true),
+    SHALLOW_SLOPE_INVERTED("shallow_slope_inverted", 8, 0, true),
+    RAISED_SHALLOW_SLOPE_INVERTED("raised_shallow_slope_inverted", 8, 8, true),
     REGULAR_SLOPE_INVERTED("regular_slope_inverted", 6, 0, true),
-    STEEP_SLOPE_INVERTED("steep_slope_inverted", 8, 0, true),
+    STEEP_SLOPE_INVERTED("steep_slope_inverted", 16, 0, true),
     RAISED_STEEP_SLOPE_INVERTED("raised_steep_slope_inverted", 8, 8, true);
 
     private final String blockName;
@@ -48,6 +48,18 @@ public enum SlopeKind {
     public boolean inverted() {
         return inverted;
     }
+
+    /**
+     * The regular bank and raised-steep IDs remain registered so saved worlds and inventories
+     * deserialize safely, but are no longer presented as new-build choices.
+     */
+    public boolean currentBuildChoice() {
+        return switch (this) {
+            case REGULAR_SLOPE, REGULAR_SLOPE_INVERTED, RAISED_STEEP_SLOPE, RAISED_STEEP_SLOPE_INVERTED -> false;
+            default -> true;
+        };
+    }
+
 
     /** The ramp's entry (low) height in the block's own 0..16 local frame, before inversion. */
     public int entryHeight() {

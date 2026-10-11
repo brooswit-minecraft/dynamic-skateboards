@@ -205,6 +205,22 @@ class GrindEdgeDetectorTest {
     }
 
     @Test
+    void everySlopeKindAndFacingHasGrindableCollisionGeometry() {
+        for (SlopeKind kind : SlopeKind.values()) {
+            for (Direction facing : Direction.Plane.HORIZONTAL) {
+                VoxelShape shape = SlopeShapes.buildFacingShapes(kind.riseVoxels(), kind.verticalShift(), kind.inverted())
+                        .get(facing);
+                FakeGrindCollisionSource source = new FakeGrindCollisionSource().put(ORIGIN, shape);
+
+                List<GrindPath> candidates = GrindEdgeDetector.findCandidatePaths(source, ORIGIN, 0);
+
+                assertFalse(candidates.isEmpty(), kind + " " + facing
+                        + " must retain a grindable collision edge in every placement orientation");
+            }
+        }
+    }
+
+    @Test
     void everyCurvedPieceVariantIsDetectedAsGrindable() {
         for (int height : new int[] {8, 16}) {
             for (ChamferSide side : ChamferSide.values()) {
