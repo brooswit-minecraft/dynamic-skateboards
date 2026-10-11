@@ -59,7 +59,16 @@ class SlopeResourceCompatibilityTest {
 
     @Test
     void productionRegistrationCatalogPreservesEveryBlockAndItemIdentity() {
-        for (SlopeRegistrationCatalog.Entry entry : SlopeRegistrationCatalog.entries()) {
+        List<SlopeRegistrationCatalog.Entry> entries = SlopeRegistrationCatalog.entries();
+        Set<String> catalogKinds = entries.stream().map(entry -> entry.kind().blockName()).collect(Collectors.toSet());
+        Set<String> catalogBlockIds = entries.stream().map(SlopeRegistrationCatalog.Entry::blockId).collect(Collectors.toSet());
+        Set<String> catalogItemIds = entries.stream().map(SlopeRegistrationCatalog.Entry::itemId).collect(Collectors.toSet());
+        assertEquals(LEGACY_SAFE_IDS, catalogKinds, "the catalog must retain every legacy-safe slope kind");
+        assertEquals(LEGACY_SAFE_IDS, catalogBlockIds, "the catalog must retain every block registration ID");
+        assertEquals(LEGACY_SAFE_IDS, catalogItemIds, "the catalog must retain every item registration ID");
+        assertEquals(LEGACY_SAFE_IDS.size(), entries.size(), "the catalog must not duplicate or omit registrations");
+
+        for (SlopeRegistrationCatalog.Entry entry : entries) {
             String id = entry.kind().blockName();
             assertEquals(id, entry.blockId(), "the production block registration must preserve " + id);
             assertEquals(id, entry.itemId(), "the production item registration must preserve " + id);
