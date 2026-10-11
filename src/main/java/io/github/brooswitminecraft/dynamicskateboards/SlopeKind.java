@@ -10,15 +10,15 @@ package io.github.brooswitminecraft.dynamicskateboards;
  * {@code STEEP.exitHeight() == RAISED_STEEP.entryHeight()}.
  */
 public enum SlopeKind {
-    SHALLOW_SLOPE("shallow_slope", 4, 0, false),
-    RAISED_SHALLOW_SLOPE("raised_shallow_slope", 4, 4, false),
+    SHALLOW_SLOPE("shallow_slope", 8, 0, false),
+    RAISED_SHALLOW_SLOPE("raised_shallow_slope", 8, 8, false),
     REGULAR_SLOPE("regular_slope", 6, 0, false),
-    STEEP_SLOPE("steep_slope", 8, 0, false),
+    STEEP_SLOPE("steep_slope", 16, 0, false),
     RAISED_STEEP_SLOPE("raised_steep_slope", 8, 8, false),
-    SHALLOW_SLOPE_INVERTED("shallow_slope_inverted", 4, 0, true),
-    RAISED_SHALLOW_SLOPE_INVERTED("raised_shallow_slope_inverted", 4, 4, true),
+    SHALLOW_SLOPE_INVERTED("shallow_slope_inverted", 8, 0, true),
+    RAISED_SHALLOW_SLOPE_INVERTED("raised_shallow_slope_inverted", 8, 8, true),
     REGULAR_SLOPE_INVERTED("regular_slope_inverted", 6, 0, true),
-    STEEP_SLOPE_INVERTED("steep_slope_inverted", 8, 0, true),
+    STEEP_SLOPE_INVERTED("steep_slope_inverted", 16, 0, true),
     RAISED_STEEP_SLOPE_INVERTED("raised_steep_slope_inverted", 8, 8, true);
 
     private final String blockName;
