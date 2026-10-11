@@ -455,13 +455,12 @@ public class DynamicSkateboardsMod {
         }
 
         /**
-         * VANILLA SNEAK SUPPRESSION: Shift's raw keybinding state is read above for this mod's own
-         * purposes (manual/grind dispatch), but that same physical key independently drives
-         * vanilla's OWN sneak input path &mdash; avoiding Minecraft's sneak-state setter is not
-         * enough by itself if the vanilla INPUT still sneaks. Clear it here, after everything else
-         * has already read it, only while the client's own mirror of this player's state is
-         * non-GROUNDED; restored automatically the instant that mirror reports GROUNDED again, same
-         * restoration shape as {@link ClickSuppressionPolicy}.
+         * VANILLA MOVEMENT SUPPRESSION: raw Shift/A/S/D state is sent above for the controller,
+         * but Shift would otherwise sneak and A/D/S would otherwise cause vanilla sideways/backward
+         * walking alongside authoritative board steering/braking. Clear those vanilla paths here,
+         * after reading raw keys, only while the client's mirror is non-GROUNDED; restore them at
+         * GROUNDED. W is left intact as a normal client input while server board velocity remains
+         * authoritative.
          */
         @SubscribeEvent
         public static void onMovementInput(MovementInputUpdateEvent event) {
@@ -469,6 +468,15 @@ public class DynamicSkateboardsMod {
             if (SneakSuppressionPolicy.suppressVanillaSneak(state)) {
                 event.getInput().shiftKeyDown = false;
             }
+            var input = event.getInput();
+            var sanitized = SkateMovementInputPolicy.suppressControllerOwnedMovement(state,
+                    new SkateMovementInputPolicy.VanillaMovementInput(
+                            input.up, input.down, input.left, input.right, input.forwardImpulse, input.leftImpulse));
+            input.down = sanitized.down();
+            input.left = sanitized.left();
+            input.right = sanitized.right();
+            input.forwardImpulse = sanitized.forwardImpulse();
+            input.leftImpulse = sanitized.leftImpulse();
         }
 
         @SubscribeEvent
