@@ -19,9 +19,9 @@ package io.github.brooswitminecraft.dynamicskateboards;
  *   <li>AIRBORNE &rarr; LANDING on touching down; LANDING &rarr; SKATING after the landing
  *       tolerance, completing the stance's animation cycle, or back to AIRBORNE if the ground
  *       drops away again before that.
- *   <li>SKATING &rarr; MANUAL on Shift while on the ground; MANUAL &rarr; SKATING on Shift release,
- *       or &rarr; AIRBORNE if the ground disappears &mdash; the ride-side half of the contextual
- *       Shift dispatch (story (c)).
+ *   <li>SKATING + grounded Shift first attempts an edge grind; if no edge accepts, it enters
+ *       MANUAL. MANUAL &rarr; SKATING on Shift release, or &rarr; AIRBORNE if the ground
+ *       disappears &mdash; the ride-side half of contextual Shift dispatch.
  *   <li>AIRBORNE + Shift routes to {@link GrindSeam#tryGrind} every tick instead &mdash; the
  *       airborne/approaching half of that same dispatch, never MANUAL.
  *   <li>AIRBORNE: left click selects a {@link FlipTrick} from {@link TrickTable} (buffered via
@@ -44,6 +44,7 @@ public final class SkateController {
     private FlipTrick completedFlip;
     private GrabTrick activeGrab;
     private boolean bailedThisTick;
+    private int forwardKickTicks;
 
     private final InputBuffer<Boolean> earlyJumpBuffer = new InputBuffer<>(SkateConstants.INPUT_BUFFER_WINDOW_TICKS);
     private final InputBuffer<TrickDirection> flipPressBuffer = new InputBuffer<>(SkateConstants.INPUT_BUFFER_WINDOW_TICKS);
@@ -79,10 +80,15 @@ public final class SkateController {
         }
 
         switch (state) {
-            case GROUNDED -> state = SkateState.SKATING;
+            case GROUNDED -> {
+                state = SkateState.SKATING;
+                headingDegrees = input.facingHeadingDegrees();
+            }
             case SKATING -> {
                 if (input.onGround() && input.shiftHeld()) {
-                    state = SkateState.MANUAL;
+                    // A nearby edge wins over manual: the same held Shift both acquires a
+                    // grounded grind and keeps the existing manual fallback away from an edge.
+                    state = grindSeam.tryGrind(input, headingDegrees) ? SkateState.SKATING : SkateState.MANUAL;
                 } else if (input.onGround() && input.jumpHeld()) {
                     state = SkateState.CHARGING;
                     chargeTicks = 0;
@@ -94,6 +100,10 @@ public final class SkateController {
                 if (!input.onGround()) {
                     state = SkateState.AIRBORNE;
                 } else if (!input.shiftHeld()) {
+                    state = SkateState.SKATING;
+                } else if (grindSeam.tryGrind(input, headingDegrees)) {
+                    // The player can roll into snap range while already holding Shift; keep
+                    // offering grounded acquisition rather than requiring a release/repress.
                     state = SkateState.SKATING;
                 }
                 // else: stays MANUAL, generous/no balance-failure - keeps rolling like SKATING.
@@ -117,7 +127,7 @@ public final class SkateController {
                     // The seam: airborne/approaching Shift routes to story (e)'s grind path, never
                     // to MANUAL. GrindSeam.NONE declines every time; the route itself is what this
                     // story ships and asserts.
-                    grindSeam.tryGrind(input);
+                    grindSeam.tryGrind(input, headingDegrees);
                 }
                 if (activeFlip == null) {
                     TrickDirection pendingFlip = flipPressBuffer.consume();
@@ -189,6 +199,7 @@ public final class SkateController {
         chargeTicks = 0;
         landingTicks = 0;
         speed = 0.0;
+        forwardKickTicks = 0;
         headingDegrees = input.facingHeadingDegrees();
         activeFlip = null;
         activeGrab = null;
@@ -210,10 +221,28 @@ public final class SkateController {
     private void updateMotion(SkateInput input) {
         boolean grounded = input.onGround() && state != SkateState.AIRBORNE;
         double maxTurn = grounded ? SkateConstants.STEER_TURN_RATE_DEGREES : SkateConstants.AIR_STEER_TURN_RATE_DEGREES;
-        headingDegrees = SkateMovement.turnTowardDegrees(headingDegrees, input.facingHeadingDegrees(), maxTurn);
-        speed = grounded
-                ? SkateMovement.nextGroundSpeed(speed, input.observedHorizontalSpeed())
-                : SkateMovement.nextAirSpeed(speed, input.observedHorizontalSpeed());
+        headingDegrees = SkateMovement.turnFromStrafe(headingDegrees, input.leftHeld(), input.rightHeld(), maxTurn);
+        if (grounded) {
+            boolean forwardKick = nextForwardKick(input.forwardHeld(), input.backHeld());
+            speed = SkateMovement.nextGroundSpeed(speed, forwardKick, input.backHeld());
+        } else {
+            forwardKickTicks = 0;
+            speed = SkateMovement.nextAirSpeed(speed, input.observedHorizontalSpeed());
+        }
+    }
+
+    /** Emits an immediate kick, then one every tuned cadence while forward remains held. */
+    private boolean nextForwardKick(boolean forwardHeld, boolean braking) {
+        if (!forwardHeld || braking) {
+            forwardKickTicks = 0;
+            return false;
+        }
+        if (forwardKickTicks == 0) {
+            forwardKickTicks = SkateConstants.KICK_CADENCE_TICKS;
+            return true;
+        }
+        forwardKickTicks--;
+        return false;
     }
 
     public SkateState state() {

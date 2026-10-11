@@ -1,7 +1,7 @@
 package io.github.brooswitminecraft.dynamicskateboards;
 
 /**
- * Pure-math arcade movement model: no Minecraft types, so the speed-retention/acceleration/
+ * Pure-math arcade movement model: no Minecraft types, so the speed-retention/kick/brake/
  * friction and steering curves are unit-testable without a running game. {@link SkateController}
  * calls these each tick; {@code DynamicSkateboardsMod} is the only place that turns the resulting
  * scalars into an actual {@code Vec3} velocity.
@@ -10,17 +10,19 @@ public final class SkateMovement {
     private SkateMovement() {}
 
     /**
-     * Next horizontal ground speed. Accelerates toward {@code observedSpeed} (capped at
-     * {@link SkateConstants#TOP_SPEED}) when that is higher than the current speed &mdash; i.e.
-     * the player is actively pushing faster &mdash; otherwise decays only by
-     * {@link SkateConstants#FRICTION}, which is deliberately gentler than vanilla's own ground
-     * friction so speed is retained rather than lost the moment input stops.
+     * Next horizontal ground speed. A forward-foot kick adds a defined amount; holding the back
+     * foot brakes to a stop and never reverses; with neither input the board coasts under its
+     * tuned friction. Observed vanilla movement is deliberately not an acceleration source.
      */
-    public static double nextGroundSpeed(double currentSpeed, double observedSpeed) {
-        double target = Math.min(observedSpeed, SkateConstants.TOP_SPEED);
-        double next = target > currentSpeed
-                ? Math.min(target, currentSpeed + SkateConstants.ACCELERATION)
-                : currentSpeed * SkateConstants.FRICTION;
+    public static double nextGroundSpeed(double currentSpeed, boolean forwardKick, boolean braking) {
+        double next;
+        if (braking) {
+            next = currentSpeed - SkateConstants.BRAKE_DECELERATION;
+        } else if (forwardKick) {
+            next = currentSpeed + SkateConstants.KICK_SPEED_GAIN;
+        } else {
+            next = currentSpeed * SkateConstants.FRICTION;
+        }
         return clampSpeed(next);
     }
 
@@ -36,6 +38,14 @@ public final class SkateMovement {
                 ? Math.min(target, currentSpeed + SkateConstants.AIR_CONTROL_ACCEL)
                 : Math.max(target, currentSpeed - SkateConstants.AIR_CONTROL_ACCEL);
         return clampSpeed(next);
+    }
+
+    /** Turns a heading directly from raw left/right steering input; opposing inputs cancel. */
+    public static double turnFromStrafe(double currentHeadingDegrees, boolean leftHeld, boolean rightHeld, double maxDeltaDegrees) {
+        if (leftHeld == rightHeld) {
+            return currentHeadingDegrees;
+        }
+        return currentHeadingDegrees + (rightHeld ? maxDeltaDegrees : -maxDeltaDegrees);
     }
 
     private static double clampSpeed(double speed) {

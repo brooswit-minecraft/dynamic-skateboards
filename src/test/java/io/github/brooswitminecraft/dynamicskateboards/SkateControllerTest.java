@@ -18,6 +18,11 @@ class SkateControllerTest {
         return new SkateInput(true, false, onGround, 0.0, 0.0, shift, attackJustPressed, useHeld, direction, 0.0);
     }
 
+    private static SkateInput riding(boolean forward, boolean back, boolean left, boolean right) {
+        return new SkateInput(true, false, true, 0.0, 0.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, forward, back, left, right);
+    }
+
     /** A touchdown ({@code onGround}) carrying {@code verticalVelocity} blocks/tick of incoming fall speed. */
     private static SkateInput landing(double verticalVelocity) {
         return new SkateInput(true, false, true, 0.0, 0.0, false, false, false, TrickDirection.NEUTRAL, verticalVelocity);
@@ -25,11 +30,22 @@ class SkateControllerTest {
 
     private static final class RecordingGrindSeam implements GrindSeam {
         private boolean called;
+        private double boardHeadingDegrees;
+        private final boolean accepts;
+
+        private RecordingGrindSeam() {
+            this(false);
+        }
+
+        private RecordingGrindSeam(boolean accepts) {
+            this.accepts = accepts;
+        }
 
         @Override
-        public boolean tryGrind(SkateInput input) {
+        public boolean tryGrind(SkateInput input, double boardHeadingDegrees) {
             called = true;
-            return false;
+            this.boardHeadingDegrees = boardHeadingDegrees;
+            return accepts;
         }
     }
 
@@ -179,6 +195,43 @@ class SkateControllerTest {
     }
 
     @Test
+    void groundedShiftAcquiresEdgeBeforeManual() {
+        RecordingGrindSeam seam = new RecordingGrindSeam(true);
+        SkateController c = new SkateController(seam);
+        c.update(held(true, false, true));
+
+        assertEquals(SkateState.SKATING, c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)));
+        assertTrue(seam.called, "grounded Shift must offer the nearby edge to the grind seam");
+    }
+
+    @Test
+    void heldForwardKicksOnACadenceAndBackBrakesToStop() {
+        SkateController c = new SkateController();
+        c.update(riding(false, false, false, false));
+        c.update(riding(true, false, false, false));
+        assertEquals(SkateConstants.KICK_SPEED_GAIN, c.speed(), 1e-9, "first forward press kicks immediately");
+        for (int tick = 0; tick <= SkateConstants.KICK_CADENCE_TICKS; tick++) {
+            c.update(riding(true, false, false, false));
+        }
+        double expectedAfterSecondKick = SkateConstants.KICK_SPEED_GAIN
+                * (1.0 + Math.pow(SkateConstants.FRICTION, SkateConstants.KICK_CADENCE_TICKS));
+        assertEquals(expectedAfterSecondKick, c.speed(), 1e-9,
+                "the second periodic kick follows the expected coast interval");
+        for (int tick = 0; tick < 10; tick++) {
+            c.update(riding(false, true, false, false));
+        }
+        assertEquals(0.0, c.speed(), 1e-9, "back is a brake, never reverse propulsion");
+    }
+
+    @Test
+    void strafeTurnsHeadingWithoutSidewaysMotionModel() {
+        SkateController c = new SkateController();
+        c.update(riding(false, false, false, false));
+        c.update(riding(false, false, true, false));
+        assertEquals(-SkateConstants.STEER_TURN_RATE_DEGREES, c.headingDegrees(), 1e-9);
+    }
+
+    @Test
     void releasingShiftWhileManualReturnsToSkating() {
         SkateController c = new SkateController();
         c.update(held(true, false, true)); // SKATING
@@ -209,12 +262,34 @@ class SkateControllerTest {
     }
 
     @Test
-    void shiftWhileAirborneNeverCallsSeamWhileRiding() {
+    void grindAcquisitionUsesBoardHeadingWhenCameraHasTurnedAway() {
+        RecordingGrindSeam seam = new RecordingGrindSeam();
+        SkateController c = new SkateController(seam);
+        // Mount facing east, then steer the board left one grounded tick to heading 80.
+        c.update(new SkateInput(true, false, true, 0.0, 90.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false));
+        c.update(new SkateInput(true, false, true, 0.0, 90.0, false, false, false,
+                TrickDirection.LEFT, 0.0, false, false, true, false));
+
+        // The camera now faces south (180), but the airborne acquisition must retain the board's
+        // travel heading rather than using that camera yaw for edge selection/travel direction.
+        c.update(new SkateInput(true, false, false, 0.0, 180.0, false, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false)); // transition to AIRBORNE
+        c.update(new SkateInput(true, false, false, 0.0, 180.0, true, false, false,
+                TrickDirection.NEUTRAL, 0.0, false, false, false, false));
+
+        assertTrue(seam.called);
+        assertEquals(80.0, seam.boardHeadingDegrees, 1e-9);
+    }
+
+    @Test
+    void groundedShiftOffersTheGrindSeamBeforeManualFallback() {
         RecordingGrindSeam seam = new RecordingGrindSeam();
         SkateController c = new SkateController(seam);
         c.update(held(true, false, true)); // SKATING
-        c.update(trick(true, true, false, false, TrickDirection.NEUTRAL)); // MANUAL via Shift
-        assertFalse(seam.called, "Shift while riding must go to MANUAL, not the grind seam");
+        SkateState state = c.update(trick(true, true, false, false, TrickDirection.NEUTRAL));
+        assertTrue(seam.called, "grounded Shift must offer the edge to the grind seam");
+        assertEquals(SkateState.MANUAL, state, "a declined edge acquisition falls back to MANUAL");
     }
 
     // --- FLIP family: left click + direction ---

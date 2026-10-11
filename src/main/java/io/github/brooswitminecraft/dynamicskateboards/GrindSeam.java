@@ -2,10 +2,9 @@ package io.github.brooswitminecraft.dynamicskateboards;
 
 /**
  * THE NAMED SEAM story (e) attaches grind detection/acquisition/following to. {@link
- * SkateController} calls {@link #tryGrind} exactly once per tick whenever Shift is held while
- * {@link SkateState#AIRBORNE} &mdash; the "airborne/approaching" half of the contextual Shift
- * dispatch this story owns (the other half, Shift while {@link SkateState#SKATING}, goes to
- * MANUAL and never reaches this seam). This story does not implement grind detection: {@link
+ * SkateController} calls {@link #tryGrind} whenever Shift is held while airborne or while seeking
+ * a grounded edge. The supplied board heading, rather than the independently movable camera yaw,
+ * is the acquisition and travel-direction authority. This story does not implement grind detection: {@link
  * #NONE} is a no-op stub that always declines, so the route exists and is asserted by test without
  * this story guessing at (e)'s own mechanics.
  *
@@ -15,11 +14,12 @@ package io.github.brooswitminecraft.dynamicskateboards;
  */
 public interface GrindSeam {
     /**
-     * Called once per tick when Shift is held while AIRBORNE. Returns {@code true} if a grind was
-     * acquired this tick (story (e)'s concern); {@link #NONE} always returns {@code false}.
+     * Called when Shift seeks a grind. {@code boardHeadingDegrees} is the controller's board
+     * travel heading, not {@link SkateInput#facingHeadingDegrees() camera facing}. Returns
+     * {@code true} if a grind was acquired this tick; {@link #NONE} always returns {@code false}.
      */
-    boolean tryGrind(SkateInput input);
+    boolean tryGrind(SkateInput input, double boardHeadingDegrees);
 
     /** The no-op stub this story ships: the seam exists and is routed to, but never engages. */
-    GrindSeam NONE = input -> false;
+    GrindSeam NONE = (input, boardHeadingDegrees) -> false;
 }
