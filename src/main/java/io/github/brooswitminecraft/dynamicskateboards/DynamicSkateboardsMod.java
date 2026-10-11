@@ -98,7 +98,7 @@ public class DynamicSkateboardsMod {
 
     static {
         for (SlopeKind kind : SlopeKind.values()) {
-            SLOPES.put(kind, BLOCKS.register(kind.blockName(), () -> new SlopeBlock(cobbleProperties(), kind)));
+            SLOPES.put(kind, BLOCKS.register(kind.blockRegistryId(), () -> new SlopeBlock(cobbleProperties(), kind)));
         }
     }
 
@@ -118,7 +118,7 @@ public class DynamicSkateboardsMod {
 
     static {
         for (SlopeKind kind : SlopeKind.values()) {
-            registerBlockItem(kind.blockName(), SLOPES.get(kind));
+            registerBlockItem(kind.itemRegistryId(), SLOPES.get(kind));
         }
         registerBlockItem("curved_step", CURVED_STEP);
         registerBlockItem("curved_wall", CURVED_WALL);
@@ -149,16 +149,10 @@ public class DynamicSkateboardsMod {
             event.accept(SKATEBOARD);
         }
         if (event.getTabKey() == CreativeModeTabs.BUILDING_BLOCKS) {
-            addCurrentBuildChoices(event::accept);
+            SlopeKind.forEachCurrentBuildChoice(kind -> event.accept(BLOCK_ITEMS.get(kind.itemRegistryId())));
+            event.accept(BLOCK_ITEMS.get("curved_step"));
+            event.accept(BLOCK_ITEMS.get("curved_wall"));
         }
-    }
-
-    /** The production Building Blocks output, separated only to make its registration policy testable. */
-    static void addCurrentBuildChoices(java.util.function.Consumer<DeferredItem<BlockItem>> accept) {
-        java.util.Arrays.stream(SlopeKind.values()).filter(SlopeKind::currentBuildChoice)
-                .map(SlopeKind::blockName).map(BLOCK_ITEMS::get).forEach(accept);
-        accept.accept(BLOCK_ITEMS.get("curved_step"));
-        accept.accept(BLOCK_ITEMS.get("curved_wall"));
     }
 
     /**

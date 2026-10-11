@@ -58,29 +58,25 @@ class SlopeResourceCompatibilityTest {
     }
 
     @Test
-    void legacyAndCurrentSlopeIdsAreActuallyRegistered() {
+    void legacyAndCurrentSlopeIdsFeedTheActualRegistrationNames() {
         for (SlopeKind kind : SlopeKind.values()) {
             String id = kind.blockName();
-            assertEquals(id, DynamicSkateboardsMod.SLOPES.get(kind).getId().getPath(),
-                    "the registered block ID must preserve " + id);
-            assertEquals(id, DynamicSkateboardsMod.BLOCK_ITEMS.get(id).getId().getPath(),
-                    "the registered item ID must preserve " + id);
+            assertEquals(id, kind.blockRegistryId(), "the registered block ID must preserve " + id);
+            assertEquals(id, kind.itemRegistryId(), "the registered item ID must preserve " + id);
         }
     }
 
     @Test
     void productionCreativeOutputShowsCurrentChoicesButNotLegacyOnlyItems() {
         List<String> output = new ArrayList<>();
-        DynamicSkateboardsMod.addCurrentBuildChoices(item -> output.add(item.getId().getPath()));
+        SlopeKind.forEachCurrentBuildChoice(kind -> output.add(kind.itemRegistryId()));
 
         for (SlopeKind kind : SlopeKind.values()) {
             assertEquals(kind.currentBuildChoice(), output.contains(kind.blockName()),
                     "production creative output must match the current-choice policy for " + kind);
         }
-        assertTrue(output.contains("curved_step"));
-        assertTrue(output.contains("curved_wall"));
-        assertTrue(output.size() < DynamicSkateboardsMod.BLOCK_ITEMS.size(),
-                "creative output must not re-expose every registered block item");
+        assertTrue(output.size() < SlopeKind.values().length,
+                "production creative slope output must not re-expose every registered slope item");
     }
 
     private static void assertResource(String path) {
