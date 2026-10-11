@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -53,6 +55,32 @@ class SlopeResourceCompatibilityTest {
             assertEquals(!LEGACY_ONLY_IDS.contains(kind.blockName()), kind.currentBuildChoice(),
                     kind + " must be hidden from current creative discovery exactly when legacy-only");
         }
+    }
+
+    @Test
+    void legacyAndCurrentSlopeIdsAreActuallyRegistered() {
+        for (SlopeKind kind : SlopeKind.values()) {
+            String id = kind.blockName();
+            assertEquals(id, DynamicSkateboardsMod.SLOPES.get(kind).getId().getPath(),
+                    "the registered block ID must preserve " + id);
+            assertEquals(id, DynamicSkateboardsMod.BLOCK_ITEMS.get(id).getId().getPath(),
+                    "the registered item ID must preserve " + id);
+        }
+    }
+
+    @Test
+    void productionCreativeOutputShowsCurrentChoicesButNotLegacyOnlyItems() {
+        List<String> output = new ArrayList<>();
+        DynamicSkateboardsMod.addCurrentBuildChoices(item -> output.add(item.getId().getPath()));
+
+        for (SlopeKind kind : SlopeKind.values()) {
+            assertEquals(kind.currentBuildChoice(), output.contains(kind.blockName()),
+                    "production creative output must match the current-choice policy for " + kind);
+        }
+        assertTrue(output.contains("curved_step"));
+        assertTrue(output.contains("curved_wall"));
+        assertTrue(output.size() < DynamicSkateboardsMod.BLOCK_ITEMS.size(),
+                "creative output must not re-expose every registered block item");
     }
 
     private static void assertResource(String path) {
