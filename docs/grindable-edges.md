@@ -13,6 +13,17 @@ box per 1/16-wide collision column, kept in lockstep with the collision shape on
 
 ## Vertical transition family (10 blocks)
 
+### MINECRAFT-111 geometry correction
+
+The current compatible profiles supersede the historical figures below: `shallow_slope` is 0→8,
+`raised_shallow_slope` is 8→16, and their normal and inverted forms tile exactly across every
+cardinal facing. `steep_slope` is a full-footprint 0→16, 45-degree profile with sixteen one-voxel
+steps; its first tread is intentionally one voxel high at the block boundary. `regular_slope` and
+`raised_steep_slope` (and both inverse IDs) remain only as serialization-safe legacy pieces for
+existing worlds/items, not current selectable transition categories. Collision and outline both
+use the shared `SlopeShapes` profile, and all preserved IDs retain blockstate, four-facing model,
+item-model, loot-table, and recipe resources.
+
 Every piece is a `SlopeBlock` ([`SlopeShapes.java`](../src/main/java/io/github/brooswitminecraft/dynamicskateboards/SlopeShapes.java),
 [`SlopeKind.java`](../src/main/java/io/github/brooswitminecraft/dynamicskateboards/SlopeKind.java)):
 a stepped, 1/16-voxel approximation of a straight ramp from an **entry height** to an **exit

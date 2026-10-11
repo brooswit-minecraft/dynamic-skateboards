@@ -5,9 +5,9 @@ package io.github.brooswitminecraft.dynamicskateboards;
  * regular, steep, raised steep) each with a normal and an inverted (ceiling-hugging) variant. See
  * {@link SlopeShapes} for what {@code riseVoxels}/{@code verticalShift}/{@code inverted} mean
  * geometrically, and docs/grindable-edges.md for the authored angles and the raised/non-raised
- * pairing invariant this enum encodes:
- * {@code SHALLOW.exitHeight() == RAISED_SHALLOW.entryHeight()} and
- * {@code STEEP.exitHeight() == RAISED_STEEP.entryHeight()}.
+ * pairing invariant this enum encodes: {@code SHALLOW.exitHeight() ==
+ * RAISED_SHALLOW.entryHeight()}. The regular and raised-steep IDs remain serialization-safe
+ * legacy pieces, while {@code STEEP} is the full 0→16 profile.
  */
 public enum SlopeKind {
     SHALLOW_SLOPE("shallow_slope", 8, 0, false),
