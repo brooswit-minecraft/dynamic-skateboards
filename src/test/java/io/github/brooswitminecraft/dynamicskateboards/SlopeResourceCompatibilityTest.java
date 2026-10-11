@@ -58,18 +58,18 @@ class SlopeResourceCompatibilityTest {
     }
 
     @Test
-    void legacyAndCurrentSlopeIdsFeedTheActualRegistrationNames() {
-        for (SlopeKind kind : SlopeKind.values()) {
-            String id = kind.blockName();
-            assertEquals(id, kind.blockRegistryId(), "the registered block ID must preserve " + id);
-            assertEquals(id, kind.itemRegistryId(), "the registered item ID must preserve " + id);
+    void productionRegistrationCatalogPreservesEveryBlockAndItemIdentity() {
+        for (SlopeRegistrationCatalog.Entry entry : SlopeRegistrationCatalog.entries()) {
+            String id = entry.kind().blockName();
+            assertEquals(id, entry.blockId(), "the production block registration must preserve " + id);
+            assertEquals(id, entry.itemId(), "the production item registration must preserve " + id);
         }
     }
 
     @Test
     void productionCreativeOutputShowsCurrentChoicesButNotLegacyOnlyItems() {
         List<String> output = new ArrayList<>();
-        SlopeKind.forEachCurrentBuildChoice(kind -> output.add(kind.itemRegistryId()));
+        SlopeRegistrationCatalog.forEachCurrentBuildChoice(entry -> output.add(entry.itemId()));
 
         for (SlopeKind kind : SlopeKind.values()) {
             assertEquals(kind.currentBuildChoice(), output.contains(kind.blockName()),

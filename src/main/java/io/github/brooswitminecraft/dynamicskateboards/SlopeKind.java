@@ -37,15 +37,6 @@ public enum SlopeKind {
         return blockName;
     }
 
-    /** Stable names consumed by the real block and block-item registrations. */
-    public String blockRegistryId() {
-        return blockName;
-    }
-
-    public String itemRegistryId() {
-        return blockName;
-    }
-
     public int riseVoxels() {
         return riseVoxels;
     }
@@ -69,14 +60,6 @@ public enum SlopeKind {
         };
     }
 
-    /** The exact slope subset emitted by {@link DynamicSkateboardsMod}'s Building Blocks callback. */
-    public static void forEachCurrentBuildChoice(java.util.function.Consumer<SlopeKind> consumer) {
-        for (SlopeKind kind : values()) {
-            if (kind.currentBuildChoice()) {
-                consumer.accept(kind);
-            }
-        }
-    }
 
     /** The ramp's entry (low) height in the block's own 0..16 local frame, before inversion. */
     public int entryHeight() {

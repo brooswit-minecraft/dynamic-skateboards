@@ -97,8 +97,8 @@ public class DynamicSkateboardsMod {
     public static final Map<SlopeKind, DeferredBlock<SlopeBlock>> SLOPES = new EnumMap<>(SlopeKind.class);
 
     static {
-        for (SlopeKind kind : SlopeKind.values()) {
-            SLOPES.put(kind, BLOCKS.register(kind.blockRegistryId(), () -> new SlopeBlock(cobbleProperties(), kind)));
+        for (SlopeRegistrationCatalog.Entry entry : SlopeRegistrationCatalog.entries()) {
+            SLOPES.put(entry.kind(), BLOCKS.register(entry.blockId(), () -> new SlopeBlock(cobbleProperties(), entry.kind())));
         }
     }
 
@@ -117,8 +117,8 @@ public class DynamicSkateboardsMod {
     }
 
     static {
-        for (SlopeKind kind : SlopeKind.values()) {
-            registerBlockItem(kind.itemRegistryId(), SLOPES.get(kind));
+        for (SlopeRegistrationCatalog.Entry entry : SlopeRegistrationCatalog.entries()) {
+            registerBlockItem(entry.itemId(), SLOPES.get(entry.kind()));
         }
         registerBlockItem("curved_step", CURVED_STEP);
         registerBlockItem("curved_wall", CURVED_WALL);
@@ -149,7 +149,7 @@ public class DynamicSkateboardsMod {
             event.accept(SKATEBOARD);
         }
         if (event.getTabKey() == CreativeModeTabs.BUILDING_BLOCKS) {
-            SlopeKind.forEachCurrentBuildChoice(kind -> event.accept(BLOCK_ITEMS.get(kind.itemRegistryId())));
+            SlopeRegistrationCatalog.forEachCurrentBuildChoice(entry -> event.accept(BLOCK_ITEMS.get(entry.itemId())));
             event.accept(BLOCK_ITEMS.get("curved_step"));
             event.accept(BLOCK_ITEMS.get("curved_wall"));
         }
