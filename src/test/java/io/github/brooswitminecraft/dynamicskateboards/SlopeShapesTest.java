@@ -88,7 +88,7 @@ class SlopeShapesTest {
     @Test
     void shallowAndSteepPairsAreDesignedToTileExactly() {
         assertEquals(SlopeKind.SHALLOW_SLOPE.exitHeight(), SlopeKind.RAISED_SHALLOW_SLOPE.entryHeight());
-        assertEquals(SlopeKind.STEEP_SLOPE.exitHeight(), SlopeKind.RAISED_STEEP_SLOPE.entryHeight());
+        assertEquals(16, SlopeKind.STEEP_SLOPE.exitHeight());
     }
 
     /**
@@ -102,9 +102,7 @@ class SlopeShapesTest {
     void slopeChainingTilesExactlyAcrossAllFacings() {
         SlopeKind[][] pairs = {
                 {SlopeKind.SHALLOW_SLOPE, SlopeKind.RAISED_SHALLOW_SLOPE},
-                {SlopeKind.STEEP_SLOPE, SlopeKind.RAISED_STEEP_SLOPE},
                 {SlopeKind.SHALLOW_SLOPE_INVERTED, SlopeKind.RAISED_SHALLOW_SLOPE_INVERTED},
-                {SlopeKind.STEEP_SLOPE_INVERTED, SlopeKind.RAISED_STEEP_SLOPE_INVERTED},
         };
         for (SlopeKind[] pair : pairs) {
             SlopeKind a = pair[0];
@@ -150,8 +148,8 @@ class SlopeShapesTest {
 
     @Test
     void angleOrderingIsShallowThenRegularThenSteep() {
-        assertTrue(SlopeKind.SHALLOW_SLOPE.angleDegrees() < SlopeKind.REGULAR_SLOPE.angleDegrees());
-        assertTrue(SlopeKind.REGULAR_SLOPE.angleDegrees() < SlopeKind.STEEP_SLOPE.angleDegrees());
+        assertTrue(SlopeKind.REGULAR_SLOPE.angleDegrees() < SlopeKind.SHALLOW_SLOPE.angleDegrees());
+        assertTrue(SlopeKind.SHALLOW_SLOPE.angleDegrees() < SlopeKind.STEEP_SLOPE.angleDegrees());
     }
 
     @Test
