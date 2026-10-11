@@ -18,9 +18,11 @@ class SlopeResourceCompatibilityTest {
             "shallow_slope", "raised_shallow_slope", "regular_slope", "steep_slope", "raised_steep_slope",
             "shallow_slope_inverted", "raised_shallow_slope_inverted", "regular_slope_inverted",
             "steep_slope_inverted", "raised_steep_slope_inverted");
+    private static final Set<String> LEGACY_ONLY_IDS = Set.of(
+            "regular_slope", "regular_slope_inverted", "raised_steep_slope", "raised_steep_slope_inverted");
 
     @Test
-    void everyPreservedSlopeIdHasBlockstateModelsItemsAndData() {
+    void everyPreservedSlopeIdHasBlockstateModelsItemsAndLegacyData() {
         Set<String> actualIds = Arrays.stream(SlopeKind.values()).map(SlopeKind::blockName).collect(Collectors.toSet());
         assertEquals(LEGACY_SAFE_IDS, actualIds, "world/item registry names must remain stable");
 
@@ -28,7 +30,11 @@ class SlopeResourceCompatibilityTest {
             String blockstate = readResource("assets/dynamicskateboards/blockstates/" + id + ".json");
             assertResource("assets/dynamicskateboards/models/item/" + id + ".json");
             assertResource("data/dynamicskateboards/loot_table/blocks/" + id + ".json");
-            assertResource("data/dynamicskateboards/recipe/" + id + ".json");
+            if (LEGACY_ONLY_IDS.contains(id)) {
+                assertNoResource("data/dynamicskateboards/recipe/" + id + ".json");
+            } else {
+                assertResource("data/dynamicskateboards/recipe/" + id + ".json");
+            }
             for (String facing : new String[] {"north", "south", "east", "west"}) {
                 assertResource("assets/dynamicskateboards/models/block/" + id + "_" + facing + ".json");
                 assertTrue(blockstate.contains("dynamicskateboards:block/" + id + "_" + facing),
@@ -43,10 +49,22 @@ class SlopeResourceCompatibilityTest {
         assertEquals(8, SlopeKind.RAISED_STEEP_SLOPE.entryHeight());
         assertEquals(16, SlopeKind.RAISED_STEEP_SLOPE.exitHeight());
         assertTrue(SlopeKind.STEEP_SLOPE.riseVoxels() == 16);
+        for (SlopeKind kind : SlopeKind.values()) {
+            assertEquals(!LEGACY_ONLY_IDS.contains(kind.blockName()), kind.currentBuildChoice(),
+                    kind + " must be hidden from current creative discovery exactly when legacy-only");
+        }
     }
 
     private static void assertResource(String path) {
         readResource(path);
+    }
+
+    private static void assertNoResource(String path) {
+        try (InputStream stream = SlopeResourceCompatibilityTest.class.getClassLoader().getResourceAsStream(path)) {
+            assertTrue(stream == null, "legacy-only profile must not retain a current recipe: " + path);
+        } catch (Exception e) {
+            throw new AssertionError("could not inspect recipe resource: " + path, e);
+        }
     }
 
     private static String readResource(String path) {

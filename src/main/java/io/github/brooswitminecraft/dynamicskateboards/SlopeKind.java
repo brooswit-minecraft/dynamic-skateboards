@@ -49,6 +49,17 @@ public enum SlopeKind {
         return inverted;
     }
 
+    /**
+     * The regular bank and raised-steep IDs remain registered so saved worlds and inventories
+     * deserialize safely, but are no longer presented as new-build choices.
+     */
+    public boolean currentBuildChoice() {
+        return switch (this) {
+            case REGULAR_SLOPE, REGULAR_SLOPE_INVERTED, RAISED_STEEP_SLOPE, RAISED_STEEP_SLOPE_INVERTED -> false;
+            default -> true;
+        };
+    }
+
     /** The ramp's entry (low) height in the block's own 0..16 local frame, before inversion. */
     public int entryHeight() {
         return verticalShift;

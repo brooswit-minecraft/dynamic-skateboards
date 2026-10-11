@@ -149,7 +149,10 @@ public class DynamicSkateboardsMod {
             event.accept(SKATEBOARD);
         }
         if (event.getTabKey() == CreativeModeTabs.BUILDING_BLOCKS) {
-            BLOCK_ITEMS.values().forEach(event::accept);
+            java.util.Arrays.stream(SlopeKind.values()).filter(SlopeKind::currentBuildChoice)
+                    .map(SlopeKind::blockName).map(BLOCK_ITEMS::get).forEach(event::accept);
+            event.accept(BLOCK_ITEMS.get("curved_step"));
+            event.accept(BLOCK_ITEMS.get("curved_wall"));
         }
     }
 
